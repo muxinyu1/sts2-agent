@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 
 class Round(BaseModel):
-    turn_index: int
+    round_index: int
     actions: List[str]
 
     def add_action(self, action: str):
@@ -16,8 +16,9 @@ class Floor(BaseModel):
     summary: str
 
     def add_turn(self, turn: Round):
-        if self.turns:
-            self.turns.append(turn)
+        if self.turns is None:
+            self.turns = []
+        self.turns.append(turn)
 
 class Act(BaseModel):
     floors: List[Floor]

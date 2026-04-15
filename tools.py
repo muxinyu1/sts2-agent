@@ -1,10 +1,3 @@
-"""STS2 agent tool function declarations (declarations only, no implementation).
-
-These functions can be parsed by frameworks such as LangChain / LangGraph
-from function signatures and docstrings, and then converted into model-readable
-tool descriptions automatically.
-"""
-
 import inspect
 import json
 import types
@@ -17,7 +10,8 @@ from exception import (
     ToolNotExistException,
     ToolResponseFormatException,
 )
-from network import Response, SingleResponse
+from game_env import game_env_instance
+from network import Response
 
 class Arg(BaseModel):
     arg_name: str
@@ -143,24 +137,24 @@ class ToolManager(BaseModel):
                 f"Failed to call tool '{tool_name}' with provided arguments: {exc}"
             ) from exc
 
-        if isinstance(result, SingleResponse):
+        if isinstance(result, Response):
             return result
 
         if isinstance(result, dict):
             status = result.get("status")
             if status in {"ok", "error"}:
-                return SingleResponse(
+                return Response(
                     status=status,
                     message=result.get("message"),
                     error=result.get("error"),
                 )
-            return SingleResponse(
+            return Response(
                 status="ok",
                 message=json.dumps(result, ensure_ascii=False),
                 error=None,
             )
 
-        return SingleResponse(status="ok", message=str(result), error=None)
+        return Response(status="ok", message=str(result), error=None)
     
     def get_tool(self, tool_name: str) -> Tool:
         for tool in self.tools:
@@ -241,11 +235,15 @@ def generate_markdown_tools(functions: list[Callable]) -> str:
 
 def play_card(card_index: int, target: str | None = None) -> dict[str, Any]:
     """Action tool: play_card.
-
+    
     Args:
         card_index: 0-based index in hand.
         target: Enemy entity_id for target-required cards.
     """
+    params: dict[str, Any] = {"card_index": card_index}
+    if target:
+        params["target"] = target
+    game_env_instance.post(play_card.__name__, params)
     raise NotImplementedError("Tool declaration placeholder: not implemented yet")
 
 
@@ -311,7 +309,12 @@ def skip_card_reward() -> dict[str, Any]:
 
 
 def proceed() -> dict[str, Any]:
-    """Action tool: proceed."""
+    """Action tool: proceed.
+
+    Note:
+        Works for rewards/rest_site/shop/treasure screens.
+        For events, use choose_event_option on the event's Proceed option.
+    """
     raise NotImplementedError("Tool declaration placeholder: not implemented yet")
 
 
@@ -325,7 +328,11 @@ def choose_event_option(index: int) -> dict[str, Any]:
 
 
 def advance_dialogue() -> dict[str, Any]:
-    """Action tool: advance_dialogue."""
+    """Action tool: advance_dialogue.
+
+    Polling note:
+        Call repeatedly until event.in_dialogue becomes false, then choose an event option.
+    """
     raise NotImplementedError("Tool declaration placeholder: not implemented yet")
 
 
@@ -340,6 +347,9 @@ def choose_rest_option(index: int) -> dict[str, Any]:
 
 def shop_purchase(index: int) -> dict[str, Any]:
     """Action tool: shop_purchase.
+
+    Polling note:
+        If state shows shop.error (inventory not ready), retry shortly after re-querying state.
 
     Args:
         index: 0-based shop item index.
@@ -410,6 +420,10 @@ def skip_relic_selection() -> dict[str, Any]:
 
 def claim_treasure_relic(index: int) -> dict[str, Any]:
     """Action tool: claim_treasure_relic.
+
+    Polling note:
+        Treasure may briefly return "Opening chest..." transitional state.
+        Re-query state until relic entries appear, then claim by index.
 
     Args:
         index: 0-based treasure relic index.
