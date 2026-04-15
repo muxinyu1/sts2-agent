@@ -1,88 +1,105 @@
-import json
+import os
+from pathlib import Path
 from typing import Any
 
-import instructor
-import inspect
-from typing import Callable, Any, Optional
+import yaml
+from agent import Sts2Agent
+from llm import LLM
+from network import Proxy
+from game_env import game_env_instance
+from tools import all_tools
 
-def generate_markdown_tools(functions: list[Callable]) -> str:
-    """将 Python 函数列表转换为适合放入 Prompt 的 Markdown 文本。"""
 
-    def annotation_to_str(annotation: Any) -> str:
-        if annotation == inspect.Signature.empty or annotation == inspect.Parameter.empty:
-            return "Any"
-        if hasattr(annotation, "__name__") and str(annotation).startswith("<class '"):
-            return annotation.__name__
-        return str(annotation).replace("typing.", "")
+PROJECT_ROOT = Path(__file__).resolve().parent
+CONFIG_PATH = PROJECT_ROOT / "config.yaml"
+ENV_PATH = PROJECT_ROOT / ".env"
 
-    markdown_lines = []
 
-    for i, func in enumerate(functions, 1):
-        name = func.__name__
-        doc = inspect.getdoc(func) or "No description."
-        sig = inspect.signature(func)
+def _load_dotenv(path: Path) -> None:
+    if not path.exists():
+        return
 
-        # 拆分 Docstring（主描述 / Args / Returns）
-        main_desc = doc
-        arg_descs = {}
-        returns_desc = ""
-        if "Args:" in doc:
-            parts = doc.split("Args:")
-            main_desc = parts[0].strip()
-            args_and_more = parts[1]
-            args_text = args_and_more.split("Returns:")[0]
-            if "Returns:" in args_and_more:
-                returns_desc = args_and_more.split("Returns:", 1)[1].strip().split("\n")[0]
-            
-            # 简单解析每行参数注释
-            for line in args_text.split('\n'):
-                line = line.strip()
-                if ':' in line and not line.startswith('-'):
-                    arg_name, arg_desc = line.split(':', 1)
-                    arg_descs[arg_name.strip()] = arg_desc.strip()
-        elif "Returns:" in doc:
-            parts = doc.split("Returns:", 1)
-            main_desc = parts[0].strip()
-            returns_desc = parts[1].strip().split("\n")[0]
-
-        # 写入工具名称和主要描述
-        markdown_lines.append(f"### {i}. {name}")
-        markdown_lines.append(f"- description: {main_desc}")
-
-        # 解析并写入参数列表
-        if not sig.parameters:
-            markdown_lines.append("- params: none")
-            markdown_lines.append("")
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
             continue
 
-        markdown_lines.append("- params:")
-        for param_name, param in sig.parameters.items():
-            # 获取类型名称，处理 Optional/Union 等复杂类型
-            annotation = param.annotation
-            type_str = annotation_to_str(annotation)
-                
-            # 判断是否必填
-            is_required = param.default == inspect.Parameter.empty
-            req_str = "required" if is_required else "optional"
-            
-            # 获取参数的自然语言描述
-            desc = arg_descs.get(param_name, "No description.")
-            markdown_lines.append(f"  - {param_name}: {type_str}, {req_str}. {desc}")
-
-        markdown_lines.append("")
-
-    return "\n".join(markdown_lines)
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            os.environ.setdefault(key, value)
 
 
-def use_potion(slot: int, target: str | None = None) -> dict[str, Any]:
-    """Action tool: use_potion.
+def _load_config(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        raise FileNotFoundError(f"Config file not found: {path}")
 
-    Args:
-        slot: Potion slot index.
-        target: Enemy entity_id for target-required potions.
-    """
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
-from langchain_core.utils.function_calling import convert_to_openai_tool
-t = convert_to_openai_tool(use_potion)
+    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if payload is None:
+        return {}
+    if not isinstance(payload, dict):
+        raise ValueError("config.yaml root must be a mapping")
+    return payload
 
-print(generate_markdown_tools([use_potion]))
+
+def _build_proxy(config: dict[str, Any]) -> Proxy:
+    network_cfg = config.get("network")
+    if not isinstance(network_cfg, dict):
+        raise ValueError("config.yaml must contain 'network' mapping")
+
+    base_url = network_cfg.get("base_url")
+    port = network_cfg.get("port")
+    if not isinstance(base_url, str) or not base_url.strip():
+        raise ValueError("config.network.base_url must be a non-empty string")
+    if not isinstance(port, int):
+        raise ValueError("config.network.port must be an integer")
+
+    return Proxy(base_url=base_url, port=port)
+
+
+def _build_llm(config: dict[str, Any]) -> LLM:
+    llm_cfg = config.get("llm")
+    if not isinstance(llm_cfg, dict):
+        raise ValueError("config.yaml must contain 'llm' mapping")
+
+    base_url = llm_cfg.get("base_url")
+    model = llm_cfg.get("model")
+    env_key_name = llm_cfg.get("env_key_name", "LLM_KEY")
+
+    if not isinstance(base_url, str) or not base_url.strip():
+        raise ValueError("config.llm.base_url must be a non-empty string")
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("config.llm.model must be a non-empty string")
+    if not isinstance(env_key_name, str) or not env_key_name.strip():
+        raise ValueError("config.llm.env_key_name must be a non-empty string")
+
+    key = os.getenv(env_key_name, "")
+    if not key:
+        raise ValueError(
+            f"LLM key is missing. Please set '{env_key_name}' in environment or .env"
+        )
+
+    return LLM(base_url=base_url, key=key, model=model)
+
+def main():
+    _load_dotenv(ENV_PATH)
+    config = _load_config(CONFIG_PATH)
+
+    proxy = _build_proxy(config)
+    # 注入proxy
+    game_env_instance.insert_proxy(proxy)
+    llm = _build_llm(config)
+
+    agent = Sts2Agent.build(
+        longterm_memories=[],
+        llm=llm,
+        all_available_tools=all_tools
+    )
+    agent.play()
+
+
+if __name__ == "__main__":
+    main()

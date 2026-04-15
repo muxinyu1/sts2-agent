@@ -81,5 +81,3 @@ class Proxy(BaseModel):
             error=f"Unexpected response type: {type(payload).__name__}",
             message=None,
         )
-
-proxy = Proxy(base_url="TODO", port=1) # TODO

@@ -1140,6 +1140,8 @@ dependencies = [
     { name = "langchain-core" },
     { name = "loguru" },
     { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "rich" },
 ]
 
 [package.metadata]
@@ -1148,6 +1150,8 @@ requires-dist = [
     { name = "langchain-core", specifier = ">=1.2.28" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "pydantic", specifier = ">=2.13.0" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
+    { name = "rich", specifier = ">=14.3.4" },
 ]
 
 [[package]]
