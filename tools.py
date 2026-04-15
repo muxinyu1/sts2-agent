@@ -233,7 +233,7 @@ def generate_markdown_tools(functions: list[Callable]) -> str:
 
 
 
-def play_card(card_index: int, target: str | None = None) -> dict[str, Any]:
+def play_card(card_index: int, target: str | None = None) -> Response:
     """Action tool: play_card.
     
     Args:
@@ -243,109 +243,117 @@ def play_card(card_index: int, target: str | None = None) -> dict[str, Any]:
     params: dict[str, Any] = {"card_index": card_index}
     if target:
         params["target"] = target
-    game_env_instance.post(play_card.__name__, params)
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    return game_env_instance.post(play_card.__name__, params)
 
 
-def use_potion(slot: int, target: str | None = None) -> dict[str, Any]:
+def use_potion(slot: int, target: str | None = None) -> Response:
     """Action tool: use_potion.
 
     Args:
         slot: Potion slot index.
         target: Enemy entity_id for target-required potions.
     """
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    params: dict[str, Any] = {"slot": slot}
+    if target:
+        params["target"] = target
+    return game_env_instance.post(use_potion.__name__, params)
 
 
-def discard_potion(slot: int) -> dict[str, Any]:
+def discard_potion(slot: int) -> Response:
     """Action tool: discard_potion.
 
     Args:
         slot: Potion slot index.
     """
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    params: dict[str, Any] = {"slot": slot}
+    return game_env_instance.post(discard_potion.__name__, params)
 
 
-def end_turn() -> dict[str, Any]:
+def end_turn() -> Response:
     """Action tool: end_turn."""
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    return game_env_instance.post(end_turn.__name__, {})
 
 
-def combat_select_card(card_index: int) -> dict[str, Any]:
+def combat_select_card(card_index: int) -> Response:
     """Action tool: combat_select_card.
 
     Args:
         card_index: Index in selectable hand cards.
     """
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    params: dict[str, Any] = {"card_index": card_index}
+    return game_env_instance.post(combat_select_card.__name__, params)
 
 
-def combat_confirm_selection() -> dict[str, Any]:
+def combat_confirm_selection() -> Response:
     """Action tool: combat_confirm_selection."""
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    return game_env_instance.post(combat_confirm_selection.__name__, {})
 
 
-def claim_reward(index: int) -> dict[str, Any]:
+def claim_reward(index: int) -> Response:
     """Action tool: claim_reward.
 
     Args:
         index: 0-based reward index.
     """
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    params: dict[str, Any] = {"index": index}
+    return game_env_instance.post(claim_reward.__name__, params)
 
 
-def select_card_reward(card_index: int) -> dict[str, Any]:
+def select_card_reward(card_index: int) -> Response:
     """Action tool: select_card_reward.
 
     Args:
         card_index: 0-based card reward index.
     """
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    params: dict[str, Any] = {"card_index": card_index}
+    return game_env_instance.post(select_card_reward.__name__, params)
 
 
-def skip_card_reward() -> dict[str, Any]:
+def skip_card_reward() -> Response:
     """Action tool: skip_card_reward."""
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    return game_env_instance.post(skip_card_reward.__name__, {})
 
 
-def proceed() -> dict[str, Any]:
+def proceed() -> Response:
     """Action tool: proceed.
 
     Note:
         Works for rewards/rest_site/shop/treasure screens.
         For events, use choose_event_option on the event's Proceed option.
     """
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    return game_env_instance.post(proceed.__name__, {})
 
 
-def choose_event_option(index: int) -> dict[str, Any]:
+def choose_event_option(index: int) -> Response:
     """Action tool: choose_event_option.
 
     Args:
         index: 0-based event option index.
     """
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    params: dict[str, Any] = {"index": index}
+    return game_env_instance.post(choose_event_option.__name__, params)
 
 
-def advance_dialogue() -> dict[str, Any]:
+def advance_dialogue() -> Response:
     """Action tool: advance_dialogue.
 
     Polling note:
         Call repeatedly until event.in_dialogue becomes false, then choose an event option.
     """
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    return game_env_instance.post(advance_dialogue.__name__, {})
 
 
-def choose_rest_option(index: int) -> dict[str, Any]:
+def choose_rest_option(index: int) -> Response:
     """Action tool: choose_rest_option.
 
     Args:
         index: 0-based rest option index.
     """
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    params: dict[str, Any] = {"index": index}
+    return game_env_instance.post(choose_rest_option.__name__, params)
 
 
-def shop_purchase(index: int) -> dict[str, Any]:
+def shop_purchase(index: int) -> Response:
     """Action tool: shop_purchase.
 
     Polling note:
@@ -354,71 +362,76 @@ def shop_purchase(index: int) -> dict[str, Any]:
     Args:
         index: 0-based shop item index.
     """
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    params: dict[str, Any] = {"index": index}
+    return game_env_instance.post(shop_purchase.__name__, params)
 
 
-def choose_map_node(index: int) -> dict[str, Any]:
+def choose_map_node(index: int) -> Response:
     """Action tool: choose_map_node.
 
     Args:
         index: 0-based map next_options index.
     """
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    params: dict[str, Any] = {"index": index}
+    return game_env_instance.post(choose_map_node.__name__, params)
 
 
-def select_card(index: int) -> dict[str, Any]:
+def select_card(index: int) -> Response:
     """Action tool: select_card.
 
     Args:
         index: 0-based card index in card_select overlay.
     """
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    params: dict[str, Any] = {"index": index}
+    return game_env_instance.post(select_card.__name__, params)
 
 
-def confirm_selection() -> dict[str, Any]:
+def confirm_selection() -> Response:
     """Action tool: confirm_selection."""
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    return game_env_instance.post(confirm_selection.__name__, {})
 
 
-def cancel_selection() -> dict[str, Any]:
+def cancel_selection() -> Response:
     """Action tool: cancel_selection."""
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    return game_env_instance.post(cancel_selection.__name__, {})
 
 
-def select_bundle(index: int) -> dict[str, Any]:
+def select_bundle(index: int) -> Response:
     """Action tool: select_bundle.
 
     Args:
         index: 0-based bundle index.
     """
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    params: dict[str, Any] = {"index": index}
+    return game_env_instance.post(select_bundle.__name__, params)
 
 
-def confirm_bundle_selection() -> dict[str, Any]:
+def confirm_bundle_selection() -> Response:
     """Action tool: confirm_bundle_selection."""
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    return game_env_instance.post(confirm_bundle_selection.__name__, {})
 
 
-def cancel_bundle_selection() -> dict[str, Any]:
+def cancel_bundle_selection() -> Response:
     """Action tool: cancel_bundle_selection."""
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    return game_env_instance.post(cancel_bundle_selection.__name__, {})
 
 
-def select_relic(index: int) -> dict[str, Any]:
+def select_relic(index: int) -> Response:
     """Action tool: select_relic.
 
     Args:
         index: 0-based relic index.
     """
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    params: dict[str, Any] = {"index": index}
+    return game_env_instance.post(select_relic.__name__, params)
 
 
-def skip_relic_selection() -> dict[str, Any]:
+def skip_relic_selection() -> Response:
     """Action tool: skip_relic_selection."""
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    return game_env_instance.post(skip_relic_selection.__name__, {})
 
 
-def claim_treasure_relic(index: int) -> dict[str, Any]:
+def claim_treasure_relic(index: int) -> Response:
     """Action tool: claim_treasure_relic.
 
     Polling note:
@@ -428,29 +441,87 @@ def claim_treasure_relic(index: int) -> dict[str, Any]:
     Args:
         index: 0-based treasure relic index.
     """
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    params: dict[str, Any] = {"index": index}
+    return game_env_instance.post(claim_treasure_relic.__name__, params)
 
 
-def crystal_sphere_set_tool(tool: Literal["big", "small"]) -> dict[str, Any]:
+def crystal_sphere_set_tool(tool: Literal["big", "small"]) -> Response:
     """Action tool: crystal_sphere_set_tool.
 
     Args:
         tool: Divination tool, either "big" or "small".
     """
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    params: dict[str, Any] = {"tool": tool}
+    return game_env_instance.post(crystal_sphere_set_tool.__name__, params)
 
 
-def crystal_sphere_click_cell(x: int, y: int) -> dict[str, Any]:
+def crystal_sphere_click_cell(x: int, y: int) -> Response:
     """Action tool: crystal_sphere_click_cell.
 
     Args:
         x: Grid x-coordinate.
         y: Grid y-coordinate.
     """
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    params: dict[str, Any] = {"x": x, "y": y}
+    return game_env_instance.post(crystal_sphere_click_cell.__name__, params)
 
 
-def crystal_sphere_proceed() -> dict[str, Any]:
+def crystal_sphere_proceed() -> Response:
     """Action tool: crystal_sphere_proceed."""
-    raise NotImplementedError("Tool declaration placeholder: not implemented yet")
+    return game_env_instance.post(crystal_sphere_proceed.__name__, {})
 
+
+def _annotation_to_type_name(annotation: Any) -> str:
+    if annotation in (inspect.Signature.empty, inspect.Parameter.empty):
+        return "Any"
+    if hasattr(annotation, "__name__") and str(annotation).startswith("<class '"):
+        return annotation.__name__
+    return str(annotation).replace("typing.", "")
+
+
+def _func_to_tool(func: Callable) -> Tool:
+    signature = inspect.signature(func)
+    args: List[Arg] = [
+        Arg(arg_name=param_name, type=_annotation_to_type_name(param.annotation))
+        for param_name, param in signature.parameters.items()
+    ]
+    return Tool(
+        state="",
+        func=func,
+        name=func.__name__,
+        args=args,
+    )
+
+
+_TOOL_FUNCTIONS: List[Callable] = [
+    play_card,
+    use_potion,
+    discard_potion,
+    end_turn,
+    combat_select_card,
+    combat_confirm_selection,
+    claim_reward,
+    select_card_reward,
+    skip_card_reward,
+    proceed,
+    choose_event_option,
+    advance_dialogue,
+    choose_rest_option,
+    shop_purchase,
+    choose_map_node,
+    select_card,
+    confirm_selection,
+    cancel_selection,
+    select_bundle,
+    confirm_bundle_selection,
+    cancel_bundle_selection,
+    select_relic,
+    skip_relic_selection,
+    claim_treasure_relic,
+    crystal_sphere_set_tool,
+    crystal_sphere_click_cell,
+    crystal_sphere_proceed,
+]
+
+
+all_tools: List[Tool] = [_func_to_tool(func) for func in _TOOL_FUNCTIONS]

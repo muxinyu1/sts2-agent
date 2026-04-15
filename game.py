@@ -7,6 +7,7 @@ from pydantic import BaseModel
 class Round(BaseModel):
     round_index: int
     actions: List[str]
+    plan: str | None = None
 
     def add_action(self, action: str):
         self.actions.append(action)

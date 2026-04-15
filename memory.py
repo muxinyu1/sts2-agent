@@ -5,8 +5,7 @@ from pydantic import BaseModel
 
 class Memory(ABC):
     def toMarkdown(self) -> str:
-        pass
-    pass
+        return "" # TODO
 
 class LongtermMemory(Memory, BaseModel):
     pass
