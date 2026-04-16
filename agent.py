@@ -139,6 +139,48 @@ class Sts2Agent(BaseModel):
         action_desc = tool_payload if tool_payload else "no_tool_payload"
         return f"state={state_type}, act/floor={act}/{floor}, action={action_desc}"
 
+    def _fallback_action_summary(self, tool_name: str, message: str) -> str:
+        text = " ".join(str(message).split())
+        max_len = 220
+        if len(text) > max_len:
+            text = text[: max_len - 3] + "..."
+        return f"{tool_name}: {text}"
+
+    def _summarize_action_message(self, tool_name: str, message: str) -> str:
+        if tool_name != "query_cards_info":
+            return message
+
+        raw_message = str(message).strip()
+        if not raw_message:
+            return f"{tool_name}: no result"
+
+        clipped = raw_message[:4000]
+        system_prompt = (
+            "You are a concise game-memory summarizer. "
+            "Summarize the tool result into exactly one short sentence for future action context. "
+            "Keep only card names and the most decision-relevant stats. "
+            "Do not output XML tags, markdown, lists, or extra explanation."
+        )
+        user_prompt = (
+            f"tool_name: {tool_name}\n"
+            "Please summarize this tool output:\n"
+            f"{clipped}"
+        )
+
+        try:
+            summary_rsp = self.llm.make_response(system_prompt, user_prompt)
+            summary_text = " ".join(str(summary_rsp).split()).strip()
+            if not summary_text:
+                return self._fallback_action_summary(tool_name, raw_message)
+
+            max_len = 280
+            if len(summary_text) > max_len:
+                summary_text = summary_text[: max_len - 3] + "..."
+            return f"{tool_name}: {summary_text}"
+        except Exception as e:
+            logger.warning(f"Action summary fallback used for {tool_name}: {e}")
+            return self._fallback_action_summary(tool_name, raw_message)
+
     def build_prompt(self) -> tuple[str, str]:
         tools = self.optimize_tool_selection().strip()
         if not tools:
@@ -315,6 +357,7 @@ class Sts2Agent(BaseModel):
             system_prompt = ""
             prompt = ""
             decision: str | None = None
+            selected_tool_name: str | None = None
             model_summary: str | None = None
             try:
                 step += 1
@@ -361,6 +404,14 @@ class Sts2Agent(BaseModel):
                     self.round.plan = plan_text
                 if tool_payload:
                     self.last_action = tool_payload
+                    try:
+                        payload_obj = json.loads(tool_payload)
+                        if isinstance(payload_obj, dict):
+                            maybe_tool_name = payload_obj.get("name")
+                            if isinstance(maybe_tool_name, str) and maybe_tool_name.strip():
+                                selected_tool_name = maybe_tool_name.strip()
+                    except json.JSONDecodeError:
+                        selected_tool_name = None
                 decision_debug_lines = [
                     f"decision_len: {len(decision)}",
                     f"tool_payload: {tool_payload if tool_payload else 'none'}",
@@ -383,12 +434,17 @@ class Sts2Agent(BaseModel):
                 if isinstance(rsp, Response):
                     if rsp.is_ok():
                         assert rsp.message
-                        self.round.add_action(rsp.message)
+                        action_message = rsp.message
+                        if selected_tool_name:
+                            action_message = self._summarize_action_message(
+                                selected_tool_name, rsp.message
+                            )
+                        self.round.add_action(action_message)
                         self.error = None
                         execution_has_error = False
                         self._debug(
                             "Tool Response",
-                            f"status: ok\nmessage: {rsp.message}",
+                            f"status: ok\nmessage: {action_message}",
                             "bright_green",
                         )
                     else:

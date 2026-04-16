@@ -1,6 +1,4 @@
-from llm import LLM
+from tools import query_cards_info
 
-
-llm = LLM()
-
-llm.make_response(system_prompt="", prompt="介绍一下杀戮尖塔")
+md = query_cards_info(["Shrug It Off", "Armaments"])
+print(md.message)

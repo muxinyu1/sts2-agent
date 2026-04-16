@@ -1,9 +1,12 @@
 import inspect
 import json
 import types
+from functools import lru_cache
+from pathlib import Path
 
 from openai import BaseModel
 from typing import Any, Callable, List, Literal, Union, get_args, get_origin
+import yaml
 
 from exception import (
     ToolArgumentsValidationException,
@@ -12,6 +15,113 @@ from exception import (
 )
 from game_env import game_env_instance
 from network import Response
+
+
+CARDS_DATA_PATH = Path(__file__).resolve().parent / "sts2_cards_data.yaml"
+COUNT_LIKE_KEYS = {"offered", "picked", "wins", "skipped_count", "skipped_wins", "count"}
+
+
+def _normalize_card_key(value: str) -> str:
+    return "".join(ch.lower() for ch in value if ch.isalnum())
+
+
+def _card_richness(card: dict[str, Any]) -> int:
+    stats = card.get("stats") if isinstance(card, dict) else None
+    stats_size = len(stats.keys()) if isinstance(stats, dict) else 0
+    return len(card.keys()) + stats_size
+
+
+def _round_floats(value: Any, decimals: int = 4) -> Any:
+    if isinstance(value, float):
+        return round(value, decimals)
+    if isinstance(value, list):
+        return [_round_floats(v, decimals=decimals) for v in value]
+    if isinstance(value, dict):
+        return {k: _round_floats(v, decimals=decimals) for k, v in value.items()}
+    return value
+
+
+def _prune_card_payload(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_prune_card_payload(v) for v in value]
+
+    if isinstance(value, dict):
+        pruned: dict[str, Any] = {}
+        for key, raw in value.items():
+            key_text = str(key)
+            if key_text == "image_url":
+                continue
+            if key_text == "asc_data":
+                continue
+            if key_text in COUNT_LIKE_KEYS or key_text.endswith("_count"):
+                continue
+            pruned[key_text] = _prune_card_payload(raw)
+        return pruned
+
+    return value
+
+
+@lru_cache(maxsize=1)
+def _load_cards_data() -> dict[str, Any]:
+    if not CARDS_DATA_PATH.exists():
+        return {}
+    with CARDS_DATA_PATH.open("r", encoding="utf-8") as f:
+        raw = yaml.safe_load(f)
+    return raw if isinstance(raw, dict) else {}
+
+
+@lru_cache(maxsize=1)
+def _build_card_query_index() -> tuple[dict[str, list[dict[str, Any]]], dict[str, float | None]]:
+    raw_data = _load_cards_data()
+    index: dict[str, list[dict[str, Any]]] = {}
+
+    baseline_numerator: dict[str, float] = {}
+    baseline_denominator: dict[str, float] = {}
+
+    for section_name, section_cards in raw_data.items():
+        if not isinstance(section_cards, list):
+            continue
+
+        section_key = str(section_name).strip().upper()
+        if section_key not in {"IRONCLAD", "SILENT", "REGENT", "NECROBINDER", "DEFECT"}:
+            continue
+
+        for card in section_cards:
+            if not isinstance(card, dict):
+                continue
+
+            normalized_name = _normalize_card_key(str(card.get("name", "")))
+            normalized_id = _normalize_card_key(str(card.get("id", "")))
+            if not normalized_name and not normalized_id:
+                continue
+
+            card_entry = dict(card)
+            card_entry["character"] = section_key
+
+            if normalized_name:
+                index.setdefault(normalized_name, []).append(card_entry)
+            if normalized_id:
+                index.setdefault(normalized_id, []).append(card_entry)
+
+            stats = card.get("stats")
+            if not isinstance(stats, dict):
+                continue
+
+            skipped_count = stats.get("skipped_count")
+            skipped_winrate = stats.get("skipped_winrate")
+            if isinstance(skipped_count, (int, float)) and isinstance(skipped_winrate, (int, float)) and skipped_count > 0:
+                baseline_numerator[section_key] = baseline_numerator.get(section_key, 0.0) + skipped_winrate * float(skipped_count)
+                baseline_denominator[section_key] = baseline_denominator.get(section_key, 0.0) + float(skipped_count)
+
+    baseline_winrates: dict[str, float | None] = {}
+    for character in ["IRONCLAD", "SILENT", "REGENT", "NECROBINDER", "DEFECT"]:
+        denom = baseline_denominator.get(character, 0.0)
+        if denom > 0:
+            baseline_winrates[character] = round(baseline_numerator[character] / denom, 4)
+        else:
+            baseline_winrates[character] = None
+
+    return index, baseline_winrates
 
 class Arg(BaseModel):
     arg_name: str
@@ -220,6 +330,9 @@ def is_tool_enabled_by_runtime(
         hand_select = state.get("hand_select")
         if not isinstance(hand_select, dict):
             return False
+        if tool_name == "query_cards_info":
+            cards = hand_select.get("cards")
+            return isinstance(cards, list) and len(cards) > 0
         if tool_name == "combat_select_card":
             cards = hand_select.get("cards")
             return isinstance(cards, list) and len(cards) > 0
@@ -242,6 +355,9 @@ def is_tool_enabled_by_runtime(
         card_reward = state.get("card_reward")
         if not isinstance(card_reward, dict):
             return False
+        if tool_name == "query_cards_info":
+            cards = card_reward.get("cards")
+            return isinstance(cards, list) and len(cards) > 0
         if tool_name == "select_card_reward":
             cards = card_reward.get("cards")
             return isinstance(cards, list) and len(cards) > 0
@@ -333,6 +449,9 @@ def is_tool_enabled_by_runtime(
         card_select = state.get("card_select")
         if not isinstance(card_select, dict):
             return False
+        if tool_name == "query_cards_info":
+            cards = card_select.get("cards")
+            return isinstance(cards, list) and len(cards) > 0
         if tool_name == "select_card":
             cards = card_select.get("cards")
             return isinstance(cards, list) and len(cards) > 0
@@ -497,6 +616,131 @@ def generate_markdown_tools(functions: list[Callable]) -> str:
         markdown_lines.append("")
 
     return "\n".join(markdown_lines)
+
+
+def query_cards_info(card_names: list[str]) -> Response:
+    """Info tool: query_cards_info.
+
+    Args:
+        card_names: Card names or ids to query. Supports multiple entries in one call.
+
+    Returns:
+        Card details and unresolved names.
+    """
+    index, baseline_winrates = _build_card_query_index()
+
+    requested = [str(name).strip() for name in card_names if str(name).strip()]
+    if not requested:
+        return Response(
+            status="error",
+            error="'card_names' must include at least one non-empty card name or id.",
+            message=None,
+        )
+
+    cards_result: list[dict[str, Any]] = []
+    not_found: list[str] = []
+
+    for raw_name in requested:
+        key = _normalize_card_key(raw_name)
+        candidates = index.get(key, [])
+
+        if not candidates:
+            not_found.append(raw_name)
+            continue
+
+        dedup: dict[tuple[str, str], dict[str, Any]] = {}
+        for candidate in candidates:
+            character = str(candidate.get("character", "")).upper()
+            card_id = str(candidate.get("id", ""))
+            dedup_key = (character, card_id)
+            existing = dedup.get(dedup_key)
+            if existing is None or _card_richness(candidate) > _card_richness(existing):
+                dedup[dedup_key] = candidate
+
+        ranked_matches = sorted(dedup.values(), key=_card_richness, reverse=True)
+        best_match = dict(ranked_matches[0])
+        cleaned_match = _prune_card_payload(best_match)
+        cards_result.append(_round_floats(cleaned_match, decimals=4))
+
+    def _fmt_percent(value: Any) -> str:
+        if not isinstance(value, (int, float)):
+            return "N/A"
+        v = float(value)
+        if 0 <= v <= 1:
+            v = v * 100.0
+        return f"{v:.4f}%"
+
+    lines: list[str] = []
+    lines.append("# Card Information Report")
+    lines.append("")
+    lines.append(f"Requested cards: {', '.join(requested)}.")
+    lines.append("")
+
+    if not cards_result:
+        lines.append("## Cards")
+        lines.append("No cards matched the query.")
+        lines.append("")
+    else:
+        lines.append("## Cards")
+        lines.append("")
+        for idx, card in enumerate(cards_result, 1):
+            name = card.get("name", "Unknown")
+            raw_stats = card.get("stats")
+            stats: dict[str, Any] = raw_stats if isinstance(raw_stats, dict) else {}
+            act_data = card.get("act_data") if isinstance(card.get("act_data"), list) else []
+
+            lines.append(f"### {idx}. {name}")
+            lines.append(
+                f"This is a {card.get('rarity', 'N/A')} {card.get('type', 'N/A')} card"
+                "."
+            )
+            lines.append(f"Energy cost: {card.get('cost', 'N/A')} (upgraded: {card.get('cost_upgraded', 'N/A')}).")
+
+            description = card.get("description")
+            if isinstance(description, str) and description.strip():
+                lines.append(f"Current effect: {description.strip()}")
+            description_upgraded = card.get("description_upgraded")
+            if isinstance(description_upgraded, str) and description_upgraded.strip():
+                lines.append(f"Upgraded effect: {description_upgraded.strip()}")
+
+            lines.append("")
+            lines.append("Win-rate snapshot:")
+            lines.append(f"- Card win rate after pick: {_fmt_percent(stats.get('win_rate'))}")
+            lines.append(f"- Card pick rate: {_fmt_percent(stats.get('pick_rate'))}")
+            lines.append(f"- Skipped win rate: {_fmt_percent(stats.get('skipped_winrate'))}")
+
+            if act_data:
+                lines.append("- Pick rate by act:")
+                for act_idx in range(3):
+                    act_entry = act_data[act_idx] if act_idx < len(act_data) else {}
+                    act_pick_rate = (
+                        act_entry.get("pick_rate")
+                        if isinstance(act_entry, dict)
+                        else None
+                    )
+                    lines.append(f"  - Act {act_idx + 1}: {_fmt_percent(act_pick_rate)}")
+
+            pairings = card.get("pairings")
+            if isinstance(pairings, list) and pairings:
+                pairing_names = []
+                for pairing in pairings[:5]:
+                    if isinstance(pairing, dict):
+                        pair_name = pairing.get("name")
+                        if isinstance(pair_name, str) and pair_name.strip():
+                            pairing_names.append(pair_name.strip())
+                if pairing_names:
+                    lines.append(f"- Frequently paired cards: {', '.join(pairing_names)}")
+
+            lines.append("")
+
+    lines.append("## Not Found")
+    if not_found:
+        for missing in not_found:
+            lines.append(f"- {missing}")
+    else:
+        lines.append("- none")
+
+    return Response(status="ok", message="\n".join(lines), error=None)
 
 
 
@@ -761,6 +1005,7 @@ def _func_to_tool(func: Callable, state: str) -> Tool:
 
 
 _TOOL_FUNCTIONS: List[tuple[Callable, str]] = [
+    (query_cards_info, "card_reward,card_select,hand_select"),
     (play_card, "monster,elite,boss"),
     (use_potion, "monster,elite,boss"),
     (discard_potion, "monster,elite,boss"),
@@ -770,7 +1015,7 @@ _TOOL_FUNCTIONS: List[tuple[Callable, str]] = [
     (claim_reward, "rewards"),
     (select_card_reward, "card_reward"),
     (skip_card_reward, "card_reward"),
-    (proceed, "rewards,rest_site,shop,fake_merchant,treasure"),
+    (proceed, "rewards,rest_site,shop,fake_merchant,treasure,monster,elite,boss"),
     (choose_event_option, "event"),
     (advance_dialogue, "event"),
     (choose_rest_option, "rest_site"),

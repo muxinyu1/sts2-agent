@@ -15,3 +15,7 @@ config.yaml
 
 # Logs
 logs
+
+# Others
+*.html
+test.py
