@@ -14,7 +14,14 @@ from llm import LLM
 from memory import LongtermMemory, ShorttermMemory
 from network import Response
 from state import State
-from tools import Tool, ToolManager, generate_markdown_tools
+from tools import Tool, ToolManager, generate_markdown_tools, optimize_tools_for_state
+from util import (
+    extract_last_action,
+    extract_plan,
+    extract_summary,
+    extract_think_preview,
+    record_trajectory_sample,
+)
 from loguru import logger
 from game_env import game_env_instance
 from rich.console import Console
@@ -22,6 +29,7 @@ from rich.panel import Panel
 
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
+LOGS_DIR = Path(__file__).resolve().parent / "logs"
 DEBUG_ENABLED = os.getenv("AGENT_DEBUG", "1").lower() not in {"0", "false", "off", "no"}
 STATE_SETTLE_SECONDS = float(os.getenv("STATE_SETTLE_SECONDS", "2"))
 console = Console()
@@ -38,6 +46,7 @@ def load_prompt_template(filename: str) -> Template:
 class Sts2Agent(BaseModel):
     longterm_memories: List[LongtermMemory]
     shorterm_memories: List[ShorttermMemory]
+    recent_state_history: List[str]
 
     llm: LLM
     tool_manager: ToolManager
@@ -84,80 +93,51 @@ class Sts2Agent(BaseModel):
             f"last_error: {error_text}"
         )
 
-    def _extract_think_preview(self, decision: str, max_len: int = 200) -> str:
-        if not isinstance(decision, str):
-            return ""
-
-        content = decision.strip()
-        if "<think>" not in content or "</think>" not in content:
-            return ""
-
-        start = content.find("<think>") + len("<think>")
-        end = content.find("</think>", start)
-        if end == -1:
-            return ""
-
-        think_text = content[start:end].strip().replace("\n", " ")
-        if len(think_text) > max_len:
-            return think_text[:max_len] + "..."
-        return think_text
-
-    def _extract_last_action(self, decision: str) -> str | None:
-        if not isinstance(decision, str):
-            return None
-
-        content = decision.strip()
-        if not content:
-            return None
-
-        if "<tool>" in content and "</tool>" in content:
-            start = content.find("<tool>") + len("<tool>")
-            end = content.find("</tool>", start)
-            if end == -1:
-                return None
-            content = content[start:end].strip()
-
-        if not content:
-            return None
-
-        try:
-            payload = json.loads(content)
-        except json.JSONDecodeError:
-            return None
-
-        if isinstance(payload, dict):
-            return json.dumps(payload, ensure_ascii=False)
-
-        return None
-
-    def _extract_plan(self, decision: str) -> str | None:
-        if not isinstance(decision, str):
-            return None
-
-        content = decision.strip()
-        if not content:
-            return None
-
-        if "<plan>" not in content or "</plan>" not in content:
-            return None
-
-        start = content.find("<plan>") + len("<plan>")
-        end = content.find("</plan>", start)
-        if end == -1:
-            return None
-
-        plan_text = content[start:end].strip()
-        if not plan_text:
-            return None
-
-        return plan_text
-
     def optimize_tool_selection(self) -> str:
         all_tools = self.tool_manager.tools
-        # TODO 根据当前状态优化可选工具，减少工具数量，暂时不实现
-        optimized_tools = all_tools
+        state = self.state.d if isinstance(self.state.d, dict) else {}
+        optimized_tools, details = optimize_tools_for_state(all_tools, state)
+
+        optimized_tool_names = details.get("selected_tools", [])
+        tool_names_preview = ", ".join(optimized_tool_names[:10]) if optimized_tool_names else "none"
+        if len(optimized_tool_names) > 10:
+            tool_names_preview += ", ..."
+
+        self._debug(
+            "Tool Selection",
+            (
+                f"state_type: {details.get('state_type') or 'none'}\n"
+                f"selection_reason: {details.get('selection_reason')}\n"
+                f"all_tools: {details.get('all_tools')}\n"
+                f"state_matched: {details.get('state_matched')}\n"
+                f"optimized_tools: {details.get('optimized_tools')}\n"
+                f"selected_tools: {tool_names_preview}"
+            ),
+            "bright_blue",
+        )
+
         optimized_functions = [t.func for t in optimized_tools]
         return generate_markdown_tools(optimized_functions)
+
+    def _recent_state_history_text(self) -> str:
+        recent = self.recent_state_history[-10:] if self.recent_state_history else []
+        return "\n".join(f"- {item}" for item in recent) if recent else "- none"
+
+    def _fallback_summary(self, tool_payload: str | None) -> str:
+        state_type = "unknown"
+        act = "?"
+        floor = "?"
+        if isinstance(self.state.d, dict):
+            raw_state_type = self.state.d.get("state_type")
+            if isinstance(raw_state_type, str) and raw_state_type.strip():
+                state_type = raw_state_type
+            raw_run = self.state.d.get("run")
+            if isinstance(raw_run, dict):
+                act = raw_run.get("act", "?")
+                floor = raw_run.get("floor", "?")
+
+        action_desc = tool_payload if tool_payload else "no_tool_payload"
+        return f"state={state_type}, act/floor={act}/{floor}, action={action_desc}"
 
     def build_prompt(self) -> tuple[str, str]:
         tools = self.optimize_tool_selection().strip()
@@ -172,6 +152,7 @@ class Sts2Agent(BaseModel):
 
         recent_actions = self.round.actions[-5:] if self.round.actions else []
         recent_actions_text = "\n".join(f"- {a}" for a in recent_actions) or "- none"
+        recent_state_history = self._recent_state_history_text()
 
         act_floor_count = len(self.act.floors) if self.act.floors else 0
         floor_turn_count = len(self.floor.turns) if self.floor.turns else 0
@@ -208,6 +189,7 @@ class Sts2Agent(BaseModel):
             last_action=last_action,
             last_error=last_error,
             recent_actions_text=recent_actions_text,
+            recent_state_history=recent_state_history,
             state_text=state_text,
         )
         return system_prompt, user_prompt
@@ -222,6 +204,7 @@ class Sts2Agent(BaseModel):
         return Sts2Agent(
             longterm_memories=longterm_memories,
             shorterm_memories=[],
+            recent_state_history=[],
             last_action=None,
             error=None,
             llm=llm,
@@ -327,6 +310,12 @@ class Sts2Agent(BaseModel):
     def play(self):
         step = 0
         while True:
+            had_previous_error = bool(self.error)
+            execution_has_error = False
+            system_prompt = ""
+            prompt = ""
+            decision: str | None = None
+            model_summary: str | None = None
             try:
                 step += 1
                 self._debug("Agent Loop", f"step: {step}", "blue")
@@ -359,9 +348,15 @@ class Sts2Agent(BaseModel):
                 decision = self.llm.make_response(
                     system_prompt, prompt
                 )  # decision是个json字符串
-                think_preview = self._extract_think_preview(decision)
-                plan_text = self._extract_plan(decision)
-                tool_payload = self._extract_last_action(decision)
+                think_preview = extract_think_preview(decision)
+                plan_text = extract_plan(decision)
+                model_summary = extract_summary(decision)
+                tool_payload = extract_last_action(decision)
+                if not model_summary:
+                    model_summary = self._fallback_summary(tool_payload)
+                self.recent_state_history.append(model_summary)
+                if len(self.recent_state_history) > 10:
+                    self.recent_state_history = self.recent_state_history[-10:]
                 if plan_text:
                     self.round.plan = plan_text
                 if tool_payload:
@@ -390,6 +385,7 @@ class Sts2Agent(BaseModel):
                         assert rsp.message
                         self.round.add_action(rsp.message)
                         self.error = None
+                        execution_has_error = False
                         self._debug(
                             "Tool Response",
                             f"status: ok\nmessage: {rsp.message}",
@@ -398,6 +394,7 @@ class Sts2Agent(BaseModel):
                     else:
                         # 重试
                         self.error = rsp.error
+                        execution_has_error = True
                         self._debug(
                             "Tool Response",
                             f"status: error\nerror: {rsp.error}",
@@ -406,11 +403,25 @@ class Sts2Agent(BaseModel):
             except ToolNotExistException as e:
                 logger.error(e)
                 self.error = f"{type(e).__name__}: {e}"
+                execution_has_error = True
                 self._debug("Exception", "ToolNotExistException\n" + str(e), "red")
                 pass
             except Exception as e:
                 logger.error(e)
                 self.error = f"{type(e).__name__}: {e}"
+                execution_has_error = True
                 self._debug("Exception", f"{type(e).__name__}\n{e}", "red")
             finally:
-                pass
+                if decision is not None:
+                    resolved_previous_error = had_previous_error and (not execution_has_error)
+                    record_trajectory_sample(
+                        LOGS_DIR,
+                        step=step,
+                        system_prompt=system_prompt,
+                        user_prompt=prompt,
+                        llm_response=decision,
+                        execution_has_error=execution_has_error,
+                        resolved_previous_error=resolved_previous_error,
+                        model_summary=model_summary,
+                        recent_state_history=self.recent_state_history[-10:],
+                    )

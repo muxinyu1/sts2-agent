@@ -17,6 +17,9 @@ Shortcut rule:
 Recent actions:
 $recent_actions_text
 
+Recent state summary history (latest up to 10):
+$recent_state_history
+
 Current game state:
 $state_text
 

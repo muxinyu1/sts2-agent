@@ -12,3 +12,6 @@ wheels/
 # Config
 .env
 config.yaml
+
+# Logs
+logs
