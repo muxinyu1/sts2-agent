@@ -14,9 +14,11 @@ Rules:
 6. Keep reasoning concise and practical.
 7. Fast path: if the current round plan is still valid and no extra reasoning is needed, you may skip thinking text and output only the action JSON inside <tool>...</tool>.
 8. Always output a concise <summary> that includes: (a) key state facts you used, (b) the action you are about to take.
+9. Always output <think_summary> as one short sentence summarizing your thinking result.
 
 Output format (strict):
 <think>your reasoning</think>  (optional)
+<think_summary>one short sentence summary of your thinking result</think_summary>
 <plan>your concise natural-language plan for current round</plan>  (optional)
 <summary>key state + planned action in one short sentence</summary>
 <tool>{"name": "tool_name", "arguments": {...}}</tool>

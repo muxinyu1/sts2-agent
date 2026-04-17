@@ -67,15 +67,19 @@ def extract_summary(decision: str) -> str | None:
     return _extract_tag_content(decision, "summary")
 
 
-def trajectory_log_path(logs_dir: Path) -> Path:
-    date_dir = logs_dir / datetime.now().strftime("%Y-%m-%d")
-    date_dir.mkdir(parents=True, exist_ok=True)
-    return date_dir / "trajectory.jsonl"
+def trajectory_log_path(logs_dir: Path, run_dir_name: str | None = None) -> Path:
+    if run_dir_name and str(run_dir_name).strip():
+        target_dir = logs_dir / str(run_dir_name).strip()
+    else:
+        target_dir = logs_dir / datetime.now().strftime("%Y-%m-%d")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    return target_dir / "trajectory.jsonl"
 
 
 def record_trajectory_sample(
     logs_dir: Path,
     *,
+    run_dir_name: str | None = None,
     step: int,
     system_prompt: str,
     user_prompt: str,
@@ -97,7 +101,7 @@ def record_trajectory_sample(
         "recent_state_history": recent_state_history,
     }
 
-    log_path = trajectory_log_path(logs_dir)
+    log_path = trajectory_log_path(logs_dir, run_dir_name=run_dir_name)
     with log_path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(sample, ensure_ascii=False) + "\n")
 

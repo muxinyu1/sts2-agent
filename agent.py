@@ -1,12 +1,13 @@
 from typing import Any, List
 import json
-import os
 import time
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from string import Template
 from pydantic import BaseModel
 
+from config import Config
 from exception import ToolNotExistException
 from game import Act, Floor, Round
 from game_env import GameEnv
@@ -30,8 +31,18 @@ from rich.panel import Panel
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 LOGS_DIR = Path(__file__).resolve().parent / "logs"
-DEBUG_ENABLED = os.getenv("AGENT_DEBUG", "1").lower() not in {"0", "false", "off", "no"}
-STATE_SETTLE_SECONDS = float(os.getenv("STATE_SETTLE_SECONDS", "2"))
+
+
+def _safe_path_component(value: str, default: str = "unknown") -> str:
+    raw = (value or "").strip()
+    if not raw:
+        raw = default
+
+    safe = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in raw)
+    safe = safe.strip("._-")
+    return safe or default
+
+BATTLE_STATE_TYPES = {"monster", "elite", "boss"}
 console = Console()
 
 
@@ -44,6 +55,8 @@ def load_prompt_template(filename: str) -> Template:
 
 
 class Sts2Agent(BaseModel):
+    config: Config
+
     longterm_memories: List[LongtermMemory]
     shorterm_memories: List[ShorttermMemory]
     recent_state_history: List[str]
@@ -62,8 +75,16 @@ class Sts2Agent(BaseModel):
     floor: Floor
     round: Round
 
+    tool_call_counts: dict[str, int]
+    tool_call_total: int
+    tool_call_error_total: int
+    tool_prompt_tokens_before: int
+    tool_prompt_tokens_after: int
+    tool_prompt_optimization_steps: int
+    run_log_dir_name: str
+
     def _debug(self, title: str, body: str, style: str = "cyan") -> None:
-        if not DEBUG_ENABLED:
+        if not self.config.agent.debug:
             return
         console.print(Panel(body, title=title, border_style=style, expand=False))
 
@@ -93,15 +114,120 @@ class Sts2Agent(BaseModel):
             f"last_error: {error_text}"
         )
 
+    def _sampling_params_for_state(self) -> tuple[float, float, str]:
+        sampling_cfg = self.config.llm.sampling
+
+        if sampling_cfg.use_default_sampling:
+            return sampling_cfg.temperature, sampling_cfg.top_p, "default_forced"
+
+        state_type = None
+        if isinstance(self.state.d, dict):
+            raw_state_type = self.state.d.get("state_type")
+            if isinstance(raw_state_type, str) and raw_state_type.strip():
+                state_type = raw_state_type.strip()
+
+        if state_type in BATTLE_STATE_TYPES:
+            return (
+                sampling_cfg.temperature_battle,
+                sampling_cfg.top_p_battle,
+                "battle",
+            )
+
+        if state_type in set(sampling_cfg.high_diversity_state_types):
+            return (
+                sampling_cfg.temperature_decision,
+                sampling_cfg.top_p_decision,
+                "high_diversity",
+            )
+
+        return sampling_cfg.temperature, sampling_cfg.top_p, "default"
+
+    def _estimate_tokens(self, text: str) -> int:
+        if not text:
+            return 0
+        # Approximate token count using a common 4-chars-per-token heuristic.
+        return max(1, (len(text) + 3) // 4)
+
+    def _record_tool_prompt_optimization(self, before_tokens: int, after_tokens: int) -> None:
+        self.tool_prompt_tokens_before += max(before_tokens, 0)
+        self.tool_prompt_tokens_after += max(after_tokens, 0)
+        self.tool_prompt_optimization_steps += 1
+
+    def _record_tool_call(self, tool_name: str | None) -> None:
+        self.tool_call_total += 1
+        if not tool_name:
+            tool_name = "unknown_tool"
+        self.tool_call_counts[tool_name] = self.tool_call_counts.get(tool_name, 0) + 1
+
+    def _record_tool_call_error(self) -> None:
+        self.tool_call_error_total += 1
+
+    def _report_run_statistics(self) -> None:
+        total_calls = self.tool_call_total
+        error_calls = self.tool_call_error_total
+        error_ratio = (error_calls / total_calls * 100.0) if total_calls > 0 else 0.0
+        before = self.tool_prompt_tokens_before
+        after = self.tool_prompt_tokens_after
+        reduced = max(before - after, 0)
+        reduction_ratio = (reduced / before * 100.0) if before > 0 else 0.0
+
+        lines: list[str] = []
+        lines.append(f"tool_calls_total: {total_calls}")
+        lines.append(f"tool_calls_error_total: {error_calls}")
+        lines.append(f"tool_calls_error_ratio: {error_ratio:.2f}%")
+        lines.append("tool_calls_by_name:")
+
+        if self.tool_call_counts:
+            for tool_name, count in sorted(
+                self.tool_call_counts.items(), key=lambda item: (-item[1], item[0])
+            ):
+                lines.append(f"- {tool_name}: {count}")
+        else:
+            lines.append("- none")
+
+        lines.append("")
+        lines.append("tool_selection_token_optimization:")
+        lines.append(f"- steps: {self.tool_prompt_optimization_steps}")
+        lines.append(f"- total_before: {before}")
+        lines.append(f"- total_after: {after}")
+        lines.append(f"- reduced_tokens: {reduced}")
+        lines.append(f"- reduced_ratio: {reduction_ratio:.2f}%")
+
+        stats_text = "\n".join(lines)
+        self._debug("Run Statistics", stats_text, "bright_magenta")
+        logger.info("Run statistics:\n{}", stats_text)
+
     def optimize_tool_selection(self) -> str:
         all_tools = self.tool_manager.tools
         state = self.state.d if isinstance(self.state.d, dict) else {}
-        optimized_tools, details = optimize_tools_for_state(all_tools, state)
+        if self.config.agent.enable_tool_optimization:
+            optimized_tools, details = optimize_tools_for_state(all_tools, state)
+        else:
+            optimized_tools = all_tools
+            state_type = state.get("state_type") if isinstance(state.get("state_type"), str) else None
+            details = {
+                "state_type": state_type,
+                "selection_reason": "tool_optimization_disabled",
+                "all_tools": len(all_tools),
+                "state_matched": len(all_tools),
+                "optimized_tools": len(all_tools),
+                "selected_tools": [t.name for t in all_tools],
+            }
 
         optimized_tool_names = details.get("selected_tools", [])
         tool_names_preview = ", ".join(optimized_tool_names[:10]) if optimized_tool_names else "none"
         if len(optimized_tool_names) > 10:
             tool_names_preview += ", ..."
+
+        all_tools_markdown = generate_markdown_tools([t.func for t in all_tools])
+        optimized_functions = [t.func for t in optimized_tools]
+        optimized_markdown = generate_markdown_tools(optimized_functions)
+
+        before_tokens = self._estimate_tokens(all_tools_markdown)
+        after_tokens = self._estimate_tokens(optimized_markdown)
+        reduced_tokens = max(before_tokens - after_tokens, 0)
+        reduced_ratio = (reduced_tokens / before_tokens * 100.0) if before_tokens > 0 else 0.0
+        self._record_tool_prompt_optimization(before_tokens, after_tokens)
 
         self._debug(
             "Tool Selection",
@@ -111,13 +237,14 @@ class Sts2Agent(BaseModel):
                 f"all_tools: {details.get('all_tools')}\n"
                 f"state_matched: {details.get('state_matched')}\n"
                 f"optimized_tools: {details.get('optimized_tools')}\n"
-                f"selected_tools: {tool_names_preview}"
+                f"selected_tools: {tool_names_preview}\n"
+                f"token_before: {before_tokens}\n"
+                f"token_after: {after_tokens}\n"
+                f"token_reduced: {reduced_tokens} ({reduced_ratio:.2f}%)"
             ),
             "bright_blue",
         )
-
-        optimized_functions = [t.func for t in optimized_tools]
-        return generate_markdown_tools(optimized_functions)
+        return optimized_markdown
 
     def _recent_state_history_text(self) -> str:
         recent = self.recent_state_history[-10:] if self.recent_state_history else []
@@ -239,11 +366,13 @@ class Sts2Agent(BaseModel):
     @classmethod
     def build(
         cls,
+        config: Config,
         longterm_memories: List[LongtermMemory],
         llm: LLM,
         all_available_tools: List[Tool],
     ) -> "Sts2Agent":
         return Sts2Agent(
+            config=config,
             longterm_memories=longterm_memories,
             shorterm_memories=[],
             recent_state_history=[],
@@ -256,6 +385,16 @@ class Sts2Agent(BaseModel):
             act=Act(floors=[]),
             floor=Floor(turns=[], summary=""),
             round=Round(round_index=0, actions=[]),
+            tool_call_counts={},
+            tool_call_total=0,
+            tool_call_error_total=0,
+            tool_prompt_tokens_before=0,
+            tool_prompt_tokens_after=0,
+            tool_prompt_optimization_steps=0,
+            run_log_dir_name=(
+                f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S_%f')[:-3]}"
+                f"_seed-{_safe_path_component(config.run.seed)}"
+            ),
         )
 
     def refresh_state(self):
@@ -354,6 +493,8 @@ class Sts2Agent(BaseModel):
         while True:
             had_previous_error = bool(self.error)
             execution_has_error = False
+            tool_call_started = False
+            tool_call_error_recorded = False
             system_prompt = ""
             prompt = ""
             decision: str | None = None
@@ -362,13 +503,14 @@ class Sts2Agent(BaseModel):
             try:
                 step += 1
                 self._debug("Agent Loop", f"step: {step}", "blue")
-                if step > 1 and STATE_SETTLE_SECONDS > 0:
+                settle_seconds = self.config.agent.state_settle_seconds
+                if step > 1 and settle_seconds > 0:
                     self._debug(
                         "Settle Wait",
-                        f"sleeping {STATE_SETTLE_SECONDS:.1f}s before state refresh",
+                        f"sleeping {settle_seconds:.1f}s before state refresh",
                         "yellow",
                     )
-                    time.sleep(STATE_SETTLE_SECONDS)
+                    time.sleep(settle_seconds)
                 # 刷新最新状态
                 self.refresh_state()
                 self._debug("State Snapshot", self._summarize_state(), "magenta")
@@ -387,9 +529,22 @@ class Sts2Agent(BaseModel):
                     f"system_prompt_len: {len(system_prompt)}\nuser_prompt:\n{prompt}",
                     "cyan",
                 )
+                temperature, top_p, sampling_profile = self._sampling_params_for_state()
+                self._debug(
+                    "Sampling",
+                    (
+                        f"profile: {sampling_profile}\n"
+                        f"temperature: {temperature:.3f}\n"
+                        f"top_p: {top_p:.3f}"
+                    ),
+                    "bright_cyan",
+                )
                 # 大模型做决策（理论上只有post）
                 decision = self.llm.make_response(
-                    system_prompt, prompt
+                    system_prompt,
+                    prompt,
+                    temperature=temperature,
+                    top_p=top_p,
                 )  # decision是个json字符串
                 think_preview = extract_think_preview(decision)
                 plan_text = extract_plan(decision)
@@ -428,6 +583,8 @@ class Sts2Agent(BaseModel):
                 # ```jsonc
                 # { "status": "error", "error": "Card requires a target. Provide 'target' with an entity_id." }
                 # ```
+                tool_call_started = True
+                self._record_tool_call(selected_tool_name)
                 rsp = self.tool_manager.call(
                     decision
                 )  # 这里decision是完整的回复，包括think，tool_manager会自动处理
@@ -451,6 +608,8 @@ class Sts2Agent(BaseModel):
                         # 重试
                         self.error = rsp.error
                         execution_has_error = True
+                        self._record_tool_call_error()
+                        tool_call_error_recorded = True
                         self._debug(
                             "Tool Response",
                             f"status: error\nerror: {rsp.error}",
@@ -460,18 +619,23 @@ class Sts2Agent(BaseModel):
                 logger.error(e)
                 self.error = f"{type(e).__name__}: {e}"
                 execution_has_error = True
+                if tool_call_started and not tool_call_error_recorded:
+                    self._record_tool_call_error()
                 self._debug("Exception", "ToolNotExistException\n" + str(e), "red")
                 pass
             except Exception as e:
                 logger.error(e)
                 self.error = f"{type(e).__name__}: {e}"
                 execution_has_error = True
+                if tool_call_started and not tool_call_error_recorded:
+                    self._record_tool_call_error()
                 self._debug("Exception", f"{type(e).__name__}\n{e}", "red")
             finally:
                 if decision is not None:
                     resolved_previous_error = had_previous_error and (not execution_has_error)
                     record_trajectory_sample(
                         LOGS_DIR,
+                        run_dir_name=self.run_log_dir_name,
                         step=step,
                         system_prompt=system_prompt,
                         user_prompt=prompt,
@@ -481,3 +645,5 @@ class Sts2Agent(BaseModel):
                         model_summary=model_summary,
                         recent_state_history=self.recent_state_history[-10:],
                     )
+
+        self._report_run_statistics()

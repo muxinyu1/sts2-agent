@@ -1,5 +1,6 @@
 import inspect
 import json
+import time
 import types
 from functools import lru_cache
 from pathlib import Path
@@ -624,6 +625,9 @@ def query_cards_info(card_names: list[str]) -> Response:
     Args:
         card_names: Card names or ids to query. Supports multiple entries in one call.
 
+    Note:
+        This tool offer more infomation about cards, including win rate, cards pairing, etc.
+    
     Returns:
         Card details and unresolved names.
     """
@@ -743,7 +747,6 @@ def query_cards_info(card_names: list[str]) -> Response:
     return Response(status="ok", message="\n".join(lines), error=None)
 
 
-
 def play_card(card_index: int, target: str | None = None) -> Response:
     """Action tool: play_card.
     
@@ -792,11 +795,17 @@ def combat_select_card(card_index: int) -> Response:
         card_index: Index in selectable hand cards.
     """
     params: dict[str, Any] = {"card_index": card_index}
-    return game_env_instance.post(combat_select_card.__name__, params)
+    game_env_instance.post(combat_select_card.__name__, params)
+    time.sleep(1) # wait 1s
+    return combat_confirm_selection()
 
 
 def combat_confirm_selection() -> Response:
-    """Action tool: combat_confirm_selection."""
+    """Action tool: combat_confirm_selection.
+    
+    Note:
+        Offen called after `combat_select_card`
+    """
     return game_env_instance.post(combat_confirm_selection.__name__, {})
 
 
@@ -1004,14 +1013,13 @@ def _func_to_tool(func: Callable, state: str) -> Tool:
     )
 
 
-_TOOL_FUNCTIONS: List[tuple[Callable, str]] = [
-    (query_cards_info, "card_reward,card_select,hand_select"),
+_BASE_TOOL_FUNCTIONS: List[tuple[Callable, str]] = [
     (play_card, "monster,elite,boss"),
     (use_potion, "monster,elite,boss"),
     (discard_potion, "monster,elite,boss"),
     (end_turn, "monster,elite,boss"),
     (combat_select_card, "hand_select"),
-    (combat_confirm_selection, "hand_select"),
+    # (combat_confirm_selection, "hand_select"),
     (claim_reward, "rewards"),
     (select_card_reward, "card_reward"),
     (skip_card_reward, "card_reward"),
@@ -1035,5 +1043,10 @@ _TOOL_FUNCTIONS: List[tuple[Callable, str]] = [
     (crystal_sphere_proceed, "crystal_sphere"),
 ]
 
+def build_all_tools(enable_query_cards_info_tool: bool = True) -> List[Tool]:
+    tool_functions = list(_BASE_TOOL_FUNCTIONS)
+    if enable_query_cards_info_tool:
+        tool_functions.insert(0, (query_cards_info, "card_reward,card_select,hand_select"))
+    return [_func_to_tool(func, state) for func, state in tool_functions]
 
-all_tools: List[Tool] = [_func_to_tool(func, state) for func, state in _TOOL_FUNCTIONS]
+all_tools: List[Tool] = build_all_tools(enable_query_cards_info_tool=True)

@@ -1,8 +1,42 @@
 network:
   base_url: "http://localhost"
   port: 15526
-  
+
 llm:
   base_url: "http://10.2.96.236:8080/v1"
-  env_key_name: "LLM_KEY"
   model: "Qwen3.5-397B-A17B"
+  env_key_name: "LLM_KEY"
+  max_tokens: 2048
+  max_token_retries: 1
+  sampling:
+    temperature: 0.25
+    top_p: 0.90
+    use_default_sampling: true
+    temperature_battle: 0.10
+    top_p_battle: 0.85
+    temperature_decision: 0.70
+    top_p_decision: 0.95
+    high_diversity_state_types:
+      - card_reward
+      - card_select
+      - hand_select
+      - event
+      - map
+      - rest_site
+      - rewards
+      - relic_select
+      - bundle_select
+      - shop
+      - fake_merchant
+      - treasure
+
+agent:
+  debug: true
+  state_settle_seconds: 3
+  enable_tool_optimization: false
+
+tools:
+  enable_query_cards_info_tool: false
+
+run:
+  seed: "XTEH794ZWL"
