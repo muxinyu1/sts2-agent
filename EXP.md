@@ -15,16 +15,21 @@ XTEH794ZWL
 
 ### Result
 
-- Floor: 23
-- 
+- Floor: 17
+- Tool Call Error Rate: 3.40%
 
 ## Ablation Study
 
-# Qwen 3.5 27B
+### Enable Tool Optimization
+
+- Tool Call Error Rate: 0.63%
+- Tokens Reduced: 88.40%
+
+# Qwen 3.5 9B
 
 ## Baseline
 
 ## Result
 
-## Qwen 3.5 27B Distill
+## Qwen 3.5 9B Distill
 
