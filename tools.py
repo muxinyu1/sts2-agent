@@ -1043,10 +1043,10 @@ _BASE_TOOL_FUNCTIONS: List[tuple[Callable, str]] = [
     (crystal_sphere_proceed, "crystal_sphere"),
 ]
 
-def build_all_tools(enable_query_cards_info_tool: bool = True) -> List[Tool]:
+def build_all_tools(enable_query_cards_info_tool: bool = False) -> List[Tool]:
     tool_functions = list(_BASE_TOOL_FUNCTIONS)
     if enable_query_cards_info_tool:
         tool_functions.insert(0, (query_cards_info, "card_reward,card_select,hand_select"))
     return [_func_to_tool(func, state) for func, state in tool_functions]
 
-all_tools: List[Tool] = build_all_tools(enable_query_cards_info_tool=True)
+all_tools: List[Tool] = build_all_tools(enable_query_cards_info_tool=False)

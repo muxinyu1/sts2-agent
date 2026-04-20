@@ -61,9 +61,7 @@ def main():
     # 注入proxy
     game_env_instance.insert_proxy(proxy)
     llm = _build_llm(config)
-    tools = build_all_tools(
-        enable_query_cards_info_tool=config.tools.enable_query_cards_info_tool
-    )
+    tools = build_all_tools(enable_query_cards_info_tool=False)
 
     agent = Sts2Agent.build(
         longterm_memories=[],

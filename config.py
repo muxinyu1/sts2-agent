@@ -48,10 +48,12 @@ class AgentConfig(BaseModel):
 	debug: bool = True
 	state_settle_seconds: float = 2.0
 	enable_tool_optimization: bool = True
+	enable_battle_judge: bool = True
+	battle_replay_limit_per_floor_battle: int = 0
 
 
 class ToolsConfig(BaseModel):
-	enable_query_cards_info_tool: bool = True
+	enable_query_cards_info_tool: bool = False
 
 
 class RunConfig(BaseModel):

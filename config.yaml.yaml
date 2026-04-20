@@ -34,6 +34,8 @@ agent:
   debug: true
   state_settle_seconds: 3
   enable_tool_optimization: false
+  enable_battle_judge: true
+  battle_replay_limit_per_floor_battle: 5
 
 tools:
   enable_query_cards_info_tool: false

@@ -67,11 +67,23 @@ def extract_summary(decision: str) -> str | None:
     return _extract_tag_content(decision, "summary")
 
 
-def trajectory_log_path(logs_dir: Path, run_dir_name: str | None = None) -> Path:
+def trajectory_log_path(
+    logs_dir: Path,
+    run_dir_name: str | None = None,
+    floor_index: int | None = None,
+    battle_index: int | None = None,
+) -> Path:
     if run_dir_name and str(run_dir_name).strip():
         target_dir = logs_dir / str(run_dir_name).strip()
     else:
         target_dir = logs_dir / datetime.now().strftime("%Y-%m-%d")
+
+    if isinstance(floor_index, int) and floor_index >= 0:
+        target_dir = target_dir / f"floor_{floor_index}"
+
+    if isinstance(battle_index, int) and battle_index >= 0:
+        target_dir = target_dir / f"battle_{battle_index}"
+
     target_dir.mkdir(parents=True, exist_ok=True)
     return target_dir / "trajectory.jsonl"
 
@@ -80,6 +92,8 @@ def record_trajectory_sample(
     logs_dir: Path,
     *,
     run_dir_name: str | None = None,
+    floor_index: int | None = None,
+    battle_index: int | None = None,
     step: int,
     system_prompt: str,
     user_prompt: str,
@@ -92,6 +106,8 @@ def record_trajectory_sample(
     sample = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "step": step,
+        "floor_index": floor_index,
+        "battle_index": battle_index,
         "system_prompt": system_prompt,
         "user_prompt": user_prompt,
         "llm_response": llm_response,
@@ -101,8 +117,56 @@ def record_trajectory_sample(
         "recent_state_history": recent_state_history,
     }
 
-    log_path = trajectory_log_path(logs_dir, run_dir_name=run_dir_name)
+    log_path = trajectory_log_path(
+        logs_dir,
+        run_dir_name=run_dir_name,
+        floor_index=floor_index,
+        battle_index=battle_index,
+    )
     with log_path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(sample, ensure_ascii=False) + "\n")
 
     return log_path
+
+
+def record_battle_replay_reward(
+    logs_dir: Path,
+    *,
+    run_dir_name: str | None = None,
+    floor_index: int | None = None,
+    battle_index: int | None = None,
+    step: int,
+    hp_loss: int,
+    replay_count: int,
+    judge_reason: str | None,
+    battle_session_key: str | None,
+    save_and_load_ok: bool,
+    save_and_load_error: str | None,
+    tool_payload: str | None,
+) -> Path:
+    trajectory_path = trajectory_log_path(
+        logs_dir,
+        run_dir_name=run_dir_name,
+        floor_index=floor_index,
+        battle_index=battle_index,
+    )
+    reward_log_path = trajectory_path.with_name("battle_replay_rewards.jsonl")
+
+    sample = {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "step": step,
+        "floor_index": floor_index,
+        "battle_index": battle_index,
+        "battle_session_key": battle_session_key,
+        "hp_loss": max(int(hp_loss), 0),
+        "replay_count": max(int(replay_count), 0),
+        "judge_reason": judge_reason,
+        "save_and_load_ok": bool(save_and_load_ok),
+        "save_and_load_error": save_and_load_error,
+        "tool_payload": tool_payload,
+    }
+
+    with reward_log_path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(sample, ensure_ascii=False) + "\n")
+
+    return reward_log_path

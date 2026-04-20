@@ -182,6 +182,8 @@ No run in progress.
 }
 ```
 
+Available actions while in `menu`: `save_and_load`, `start_singleplayer_run`.
+
 ### `unknown`
 
 Run state or room type not recognized.
@@ -731,6 +733,41 @@ All POST requests use a JSON body with an `"action"` field and action-specific p
 
 ---
 
+### `start_singleplayer_run`
+
+Start a new singleplayer run from the main menu using a custom seed.
+
+```json
+{ "action": "start_singleplayer_run", "seed": "ABC123" }
+```
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `seed` | string | Yes | Seed string for the new run |
+
+Automates this UI flow: **Single Player → Custom → Seed → Confirm**.
+Uses current in-game defaults for character/ascension (typically Ironclad, Ascension 0).
+
+**Notes:**
+- This action only works when no run is in progress (`state_type: menu`).
+- Depending on UI transition timing, you may need to call it again once to finish the flow.
+
+### `save_and_load`
+
+
+```json
+{ "action": "save_and_load" }
+```
+
+This action has no parameters and behaves as follows:
+- If a run is active: performs **Save and Quit**.
+- If no run is active (main menu): clicks **Continue**.
+- The API call blocks until the run is active and game state is usable again (or timeout).
+
+**Notes:**
+- This action can be called repeatedly across UI transitions.
+- If no resumable run exists while on menu, it returns an error.
+
 ### `play_card`
 
 Play a card from hand during combat.
@@ -1048,3 +1085,139 @@ Finish the Crystal Sphere minigame.
 ```json
 { "action": "crystal_sphere_proceed" }
 ```
+
+---
+
+## Multiplayer Additions
+
+### GET — Additional Top-Level Fields
+
+```jsonc
+{
+  "game_mode": "multiplayer",
+  "net_type": "SteamMultiplayer",
+  "player_count": 2,
+  "local_player_slot": 0,      // Index of local player in players array
+  "players": [                  // Summary of all players
+    {
+      "character": "The Ironclad",
+      "hp": 72, "max_hp": 80,
+      "gold": 99,
+      "is_alive": true,
+      "is_local": true
+    }
+  ]
+}
+```
+
+### Battle State Additions
+
+```jsonc
+{
+  "battle": {
+    "all_players_ready": false
+    // Same shape as singleplayer (round, turn, is_play_phase, enemies).
+    // Player state lives in top-level "player" (local) and "players" (all).
+  },
+  "players": [
+    {
+      "character": "The Ironclad",
+      "hp": 72, "max_hp": 80,
+      "gold": 99,
+      "is_alive": true,
+      "is_local": true,
+      "is_ready_to_end_turn": false   // Only present during combat
+    },
+    {
+      "character": "The Necrobinder",
+      "hp": 60, "max_hp": 66,
+      "gold": 80,
+      "is_alive": true,
+      "is_local": false,
+      "is_ready_to_end_turn": false,
+      "pets": [                       // Omitted for local player (pets are under top-level "player")
+        {
+          "id": "OSTY",
+          "name": "Otsy",
+          "alive": true,
+          "hp": 12, "max_hp": 12,
+          "block": 0,
+          "status": [ /* Power Objects */ ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Map State Additions
+
+```jsonc
+{
+  "map": {
+    "votes": [
+      {
+        "player": "The Ironclad",
+        "is_local": true,
+        "voted": true,
+        "vote_col": 2, "vote_row": 3
+      }
+    ],
+    "all_voted": false
+  }
+}
+```
+
+### Event State Additions
+
+```jsonc
+{
+  "event": {
+    "is_shared": true,
+    "votes": [
+      {
+        "player": "The Ironclad",
+        "is_local": true,
+        "voted": true,
+        "vote_option": 0
+      }
+    ],
+    "all_voted": false
+  }
+}
+```
+
+### Treasure State Additions
+
+```jsonc
+{
+  "treasure": {
+    "is_bidding_phase": true,
+    "bids": [
+      {
+        "player": "The Ironclad",
+        "is_local": true,
+        "voted": true,
+        "vote_relic_index": 0
+      }
+    ],
+    "all_bid": false
+  }
+}
+```
+
+### Multiplayer-Only Actions
+
+**End turn (vote):**
+```json
+{ "action": "end_turn" }
+```
+In multiplayer, this is a vote. The turn ends only when all players submit.
+
+**Undo end turn:**
+```json
+{ "action": "undo_end_turn" }
+```
+Retract the end-turn vote before all players have committed.
+
+All other actions work identically to singleplayer.
