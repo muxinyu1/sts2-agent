@@ -182,7 +182,7 @@ No run in progress.
 }
 ```
 
-Available actions while in `menu`: `save_and_load`, `start_singleplayer_run`.
+Available actions while in `menu`: `save_and_load`, `backup_save`, `load_save`, `replay_battle`, `start_singleplayer_run`.
 
 ### `unknown`
 
@@ -754,6 +754,7 @@ Uses current in-game defaults for character/ascension (typically Ironclad, Ascen
 
 ### `save_and_load`
 
+Merged action for saving/quitting and loading a run.
 
 ```json
 { "action": "save_and_load" }
@@ -767,6 +768,63 @@ This action has no parameters and behaves as follows:
 **Notes:**
 - This action can be called repeatedly across UI transitions.
 - If no resumable run exists while on menu, it returns an error.
+
+### `backup_save`
+
+Create a named save backup slot.
+
+```json
+{ "action": "backup_save", "id": 1 }
+```
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `id` | string/int | Yes | Backup slot identifier (e.g. sampling round index) |
+
+Behavior:
+- If a run is active: performs **Save and Quit**, copies save files into named slot, then clicks **Continue**.
+- If on menu: copies save files into named slot directly.
+- The API call blocks until operation completes (or timeout).
+
+### `load_save`
+
+Load a named save backup slot and continue run.
+
+```json
+{ "action": "load_save", "id": 1 }
+```
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `id` | string/int | Yes | Backup slot identifier to restore |
+
+Behavior:
+- If a run is active: performs **Save and Quit**, restores selected slot files, then clicks **Continue**.
+- If on menu: restores selected slot files, then clicks **Continue**.
+- The API call blocks until operation completes (or timeout).
+
+**Notes:**
+- Useful for multi-sample combat evaluation workflows (keep best sample, discard worse final sample).
+- Returns an error if the target slot does not exist.
+
+### `replay_battle`
+
+Restore the latest auto-captured combat checkpoint, then continue the run.
+
+```json
+{ "action": "replay_battle" }
+```
+
+This action has no parameters and behaves as follows:
+- Combat checkpoints are auto-captured when entering combat.
+- If a run is active: performs **Save and Quit**, waits for menu, restores checkpoint save files, then clicks **Continue**.
+- If already on menu: restores checkpoint save files, then clicks **Continue**.
+- The API call blocks until the run is active and game state is usable again (or timeout).
+
+**Notes:**
+- Singleplayer only.
+- Allows replaying the latest entered combat even after the combat already ended (for example on rewards screen).
+- Returns an error if no combat checkpoint has been captured yet.
 
 ### `play_card`
 

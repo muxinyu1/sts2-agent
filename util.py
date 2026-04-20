@@ -138,10 +138,11 @@ def record_battle_replay_reward(
     step: int,
     hp_loss: int,
     replay_count: int,
-    judge_reason: str | None,
+    replay_reason: str | None,
     battle_session_key: str | None,
-    save_and_load_ok: bool,
-    save_and_load_error: str | None,
+    replay_ok: bool,
+    replay_error: str | None,
+    replay_action: str,
     tool_payload: str | None,
 ) -> Path:
     trajectory_path = trajectory_log_path(
@@ -160,9 +161,10 @@ def record_battle_replay_reward(
         "battle_session_key": battle_session_key,
         "hp_loss": max(int(hp_loss), 0),
         "replay_count": max(int(replay_count), 0),
-        "judge_reason": judge_reason,
-        "save_and_load_ok": bool(save_and_load_ok),
-        "save_and_load_error": save_and_load_error,
+        "replay_reason": replay_reason,
+        "replay_action": replay_action,
+        "replay_ok": bool(replay_ok),
+        "replay_error": replay_error,
         "tool_payload": tool_payload,
     }
 

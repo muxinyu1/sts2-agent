@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 
 class NetworkConfig(BaseModel):
@@ -48,7 +48,10 @@ class AgentConfig(BaseModel):
 	debug: bool = True
 	state_settle_seconds: float = 2.0
 	enable_tool_optimization: bool = True
-	enable_battle_judge: bool = True
+	enable_battle_replay: bool = Field(
+		default=True,
+		validation_alias=AliasChoices("enable_battle_replay", "enable_battle_judge"),
+	)
 	battle_replay_limit_per_floor_battle: int = 0
 
 

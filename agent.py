@@ -97,17 +97,14 @@ class Sts2Agent(BaseModel):
     log_floor_battle_counts: dict[int, int]
     log_was_in_battle: bool
     replay_was_in_battle: bool
-    replay_pending_reload: bool
-    replay_pending_floor: int | None
-    replay_pending_signature: str | None
     replay_current_floor: int | None
     replay_current_signature: str | None
     replay_current_count: int
     replay_current_start_hp: int | None
     replay_agent_snapshot: dict[str, Any] | None
     replay_rewards_by_battle: dict[str, list[int]]
-    judge_call_total: int
-    judge_call_error_total: int
+    replay_attempt_total: int
+    replay_attempt_error_total: int
 
     def _debug(self, title: str, body: str, style: str = "cyan") -> None:
         if not self.config.agent.debug:
@@ -219,21 +216,21 @@ class Sts2Agent(BaseModel):
         lines.append(f"- reduced_tokens: {reduced}")
         lines.append(f"- reduced_ratio: {reduction_ratio:.2f}%")
 
-        judge_calls = self.judge_call_total
-        judge_errors = self.judge_call_error_total
-        judge_error_ratio = (judge_errors / judge_calls * 100.0) if judge_calls > 0 else 0.0
+        replay_calls = self.replay_attempt_total
+        replay_errors = self.replay_attempt_error_total
+        replay_error_ratio = (replay_errors / replay_calls * 100.0) if replay_calls > 0 else 0.0
         reward_samples = sum(len(v) for v in self.replay_rewards_by_battle.values())
 
         lines.append("")
         lines.append("battle_replay:")
-        lines.append(f"- judge_enabled: {self.config.agent.enable_battle_judge}")
+        lines.append(f"- replay_enabled: {self.config.agent.enable_battle_replay}")
         lines.append(
             "- replay_limit_per_floor_battle: "
             f"{self.config.agent.battle_replay_limit_per_floor_battle}"
         )
-        lines.append(f"- judge_calls_total: {judge_calls}")
-        lines.append(f"- judge_calls_error_total: {judge_errors}")
-        lines.append(f"- judge_calls_error_ratio: {judge_error_ratio:.2f}%")
+        lines.append(f"- replay_attempt_total: {replay_calls}")
+        lines.append(f"- replay_attempt_error_total: {replay_errors}")
+        lines.append(f"- replay_attempt_error_ratio: {replay_error_ratio:.2f}%")
         lines.append(f"- replay_reward_samples: {reward_samples}")
 
         stats_text = "\n".join(lines)
@@ -527,17 +524,14 @@ class Sts2Agent(BaseModel):
             log_floor_battle_counts={},
             log_was_in_battle=False,
             replay_was_in_battle=False,
-            replay_pending_reload=False,
-            replay_pending_floor=None,
-            replay_pending_signature=None,
             replay_current_floor=None,
             replay_current_signature=None,
             replay_current_count=0,
             replay_current_start_hp=None,
             replay_agent_snapshot=None,
             replay_rewards_by_battle={},
-            judge_call_total=0,
-            judge_call_error_total=0,
+            replay_attempt_total=0,
+            replay_attempt_error_total=0,
         )
 
     def refresh_state(self):
@@ -775,163 +769,22 @@ class Sts2Agent(BaseModel):
         run_floor = self._extract_run_floor()
         signature = self._battle_signature() if in_battle_now else None
 
-        is_expected_reload = (
-            self.replay_pending_reload
-            and in_battle_now
-            and run_floor is not None
-            and bool(signature)
-            and self.replay_pending_floor == run_floor
-            and self.replay_pending_signature == signature
-        )
-
-        # 关键修复：save_and_load 可能直接回到 battle，不会经过非 battle 状态。
-        # 这种情况下也要优先恢复 battle 开始时的 agent 快照。
-        if is_expected_reload:
-            self._restore_replay_snapshot()
-            self.replay_pending_reload = False
-            self.replay_pending_floor = None
-            self.replay_pending_signature = None
-            self.replay_was_in_battle = in_battle_now
-            return
-
         if in_battle_now and run_floor is not None and signature:
             if not self.replay_was_in_battle:
-                self.replay_pending_reload = False
-                self.replay_pending_floor = None
-                self.replay_pending_signature = None
                 self.replay_current_floor = run_floor
                 self.replay_current_signature = signature
-                self.replay_current_count = 0
-                self.replay_current_start_hp = self._extract_player_hp()
-                self.replay_agent_snapshot = self._capture_replay_snapshot()
-
                 battle_key = self._battle_session_key(
                     self.replay_current_floor,
                     self.replay_current_signature,
                 )
+                existing_rewards = self.replay_rewards_by_battle.get(battle_key, []) if battle_key else []
+                self.replay_current_count = len(existing_rewards)
+                self.replay_current_start_hp = self._extract_player_hp()
+                self.replay_agent_snapshot = self._capture_replay_snapshot()
                 if battle_key and battle_key not in self.replay_rewards_by_battle:
                     self.replay_rewards_by_battle[battle_key] = []
-        else:
-            if self.replay_was_in_battle and not self.replay_pending_reload:
-                self._clear_replay_session()
 
         self.replay_was_in_battle = in_battle_now
-
-    def _extract_first_json_object(self, text: str) -> dict[str, Any] | None:
-        if not isinstance(text, str):
-            return None
-
-        raw = text.strip()
-        if not raw:
-            return None
-
-        if raw.startswith("```"):
-            lines = raw.splitlines()
-            if len(lines) >= 3 and lines[0].startswith("```") and lines[-1].startswith("```"):
-                raw = "\n".join(lines[1:-1]).strip()
-
-        try:
-            payload = json.loads(raw)
-            return payload if isinstance(payload, dict) else None
-        except json.JSONDecodeError:
-            pass
-
-        start = raw.find("{")
-        end = raw.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            return None
-
-        try:
-            payload = json.loads(raw[start : end + 1])
-        except json.JSONDecodeError:
-            return None
-
-        return payload if isinstance(payload, dict) else None
-
-    def _should_run_battle_judge(self, tool_payload: str | None) -> bool:
-        if not self.config.agent.enable_battle_judge:
-            return False
-        if self.config.agent.battle_replay_limit_per_floor_battle <= 0:
-            return False
-        if not self._is_in_battle_context():
-            return False
-        if not tool_payload:
-            return False
-        if self.replay_current_floor is None:
-            return False
-        if self.replay_current_signature is None:
-            return False
-        if self.replay_current_start_hp is None:
-            return False
-        return self.replay_current_count < self.config.agent.battle_replay_limit_per_floor_battle
-
-    def _run_battle_judge(
-        self,
-        tool_payload: str,
-    ) -> tuple[bool, int, str] | None:
-        self.judge_call_total += 1
-
-        state_text = ""
-        if isinstance(self.state.d, dict):
-            state_text = json.dumps(self.state.d, ensure_ascii=False, indent=2)
-        state_text = state_text[:9000]
-
-        current_hp = self._extract_player_hp()
-        start_hp = self.replay_current_start_hp
-
-        judge_system_prompt = (
-            "You are a strict Slay the Spire 2 battle terminal judge. "
-            "Decide whether executing the proposed action immediately ends this battle "
-            "(victory or player death) before the next agent decision point. "
-            "Output JSON only with keys: will_end_battle (bool), outcome (victory|defeat|unknown), "
-            "hp_loss (non-negative integer, damage from battle-start HP), reason (short string)."
-        )
-        judge_user_prompt = (
-            f"battle_start_hp: {start_hp}\n"
-            f"current_hp: {current_hp}\n"
-            f"replay_count: {self.replay_current_count}\n"
-            f"replay_limit: {self.config.agent.battle_replay_limit_per_floor_battle}\n"
-            f"proposed_action_json: {tool_payload}\n"
-            "current_state_json:\n"
-            f"{state_text}"
-        )
-
-        try:
-            rsp = self.llm.make_response(
-                judge_system_prompt,
-                judge_user_prompt,
-                temperature=0.10,
-                top_p=0.20,
-            )
-        except Exception as e:
-            self.judge_call_error_total += 1
-            logger.warning(f"Battle judge call failed: {e}")
-            return None
-
-        payload = self._extract_first_json_object(rsp)
-        if not isinstance(payload, dict):
-            self.judge_call_error_total += 1
-            logger.warning("Battle judge returned non-JSON payload")
-            return None
-
-        will_end = payload.get("will_end_battle")
-        if not isinstance(will_end, bool):
-            self.judge_call_error_total += 1
-            logger.warning("Battle judge payload missing boolean will_end_battle")
-            return None
-
-        raw_hp_loss = payload.get("hp_loss", 0)
-        hp_loss = 0
-        if isinstance(raw_hp_loss, (int, float)):
-            hp_loss = max(0, int(round(float(raw_hp_loss))))
-
-        if isinstance(start_hp, int):
-            hp_loss = min(hp_loss, start_hp)
-
-        reason = payload.get("reason")
-        reason_text = str(reason).strip() if isinstance(reason, str) else ""
-
-        return will_end, hp_loss, reason_text
 
     def _record_replay_reward(self, hp_loss: int) -> None:
         battle_key = self._battle_session_key(
@@ -942,8 +795,112 @@ class Sts2Agent(BaseModel):
             return
         self.replay_rewards_by_battle.setdefault(battle_key, []).append(max(hp_loss, 0))
 
-    def _save_and_load_for_replay(self) -> Response:
-        return self.game_env.post("save_and_load", {})
+    def _replay_battle_for_replay(self) -> Response:
+        return self.game_env.post("replay_battle", {})
+
+    def _maybe_handle_battle_end_replay(self, step: int) -> bool:
+        in_battle_now = self._is_in_battle_context()
+        if in_battle_now or not self.replay_was_in_battle:
+            return False
+
+        start_hp = self.replay_current_start_hp if isinstance(self.replay_current_start_hp, int) else None
+        current_hp = self._extract_player_hp()
+        hp_loss = 0
+        if start_hp is not None:
+            if isinstance(current_hp, int):
+                hp_loss = max(0, start_hp - current_hp)
+            else:
+                hp_loss = start_hp
+
+        self._record_replay_reward(hp_loss)
+
+        replay_limit = max(0, int(self.config.agent.battle_replay_limit_per_floor_battle))
+        should_replay = (
+            self.config.agent.enable_battle_replay
+            and replay_limit > 0
+            and self.replay_current_count < replay_limit
+        )
+
+        if not should_replay:
+            if not self.config.agent.enable_battle_replay:
+                skip_reason = "battle ended; replay skipped (disabled)"
+            elif replay_limit <= 0:
+                skip_reason = "battle ended; replay skipped (limit <= 0)"
+            else:
+                skip_reason = "battle ended; replay skipped (limit reached)"
+
+            try:
+                record_battle_replay_reward(
+                    LOGS_DIR,
+                    run_dir_name=self.run_log_dir_name,
+                    floor_index=self.log_current_floor,
+                    battle_index=self.log_current_battle_index,
+                    step=step,
+                    hp_loss=hp_loss,
+                    replay_count=self.replay_current_count,
+                    replay_reason=skip_reason,
+                    battle_session_key=self._battle_session_key(
+                        self.replay_current_floor,
+                        self.replay_current_signature,
+                    ),
+                    replay_ok=False,
+                    replay_error=skip_reason,
+                    replay_action="skip_replay",
+                    tool_payload=None,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to persist replay reward log: {e}")
+
+            self._clear_replay_session()
+            self.replay_was_in_battle = False
+            return False
+
+        self.replay_attempt_total += 1
+        self.replay_current_count += 1
+        replay_rsp = self._replay_battle_for_replay()
+
+        replay_reason = "battle ended; replay_battle invoked"
+        try:
+            record_battle_replay_reward(
+                LOGS_DIR,
+                run_dir_name=self.run_log_dir_name,
+                floor_index=self.log_current_floor,
+                battle_index=self.log_current_battle_index,
+                step=step,
+                hp_loss=hp_loss,
+                replay_count=self.replay_current_count,
+                replay_reason=replay_reason,
+                battle_session_key=self._battle_session_key(
+                    self.replay_current_floor,
+                    self.replay_current_signature,
+                ),
+                replay_ok=replay_rsp.is_ok(),
+                replay_error=replay_rsp.error,
+                replay_action="replay_battle",
+                tool_payload=None,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to persist replay reward log: {e}")
+
+        if replay_rsp.is_ok():
+            replay_action = (
+                "battle_replay: battle ended; "
+                f"hp_loss={hp_loss}; replay_count={self.replay_current_count}; "
+                "replay_battle executed"
+            )
+            self.round.add_action(replay_action)
+            self.error = None
+            self._restore_replay_snapshot()
+            self._debug("Battle Replay", replay_action, "bright_yellow")
+            self.replay_was_in_battle = False
+            return True
+
+        self.replay_attempt_error_total += 1
+        self.error = replay_rsp.error
+        self._debug("Battle Replay", f"replay_battle failed: {replay_rsp.error}", "red")
+        self._clear_replay_session()
+        self.replay_was_in_battle = False
+        return False
 
     def play(self):
         step = 0
@@ -971,6 +928,8 @@ class Sts2Agent(BaseModel):
                 # 刷新最新状态
                 self.refresh_state()
                 self._update_log_bucket()
+                if self._maybe_handle_battle_end_replay(step):
+                    continue
                 self._update_replay_session()
                 self._debug("State Snapshot", self._summarize_state(), "magenta")
                 if self._is_game_over_overlay():
@@ -1042,69 +1001,6 @@ class Sts2Agent(BaseModel):
                 # ```jsonc
                 # { "status": "error", "error": "Card requires a target. Provide 'target' with an entity_id." }
                 # ```
-                if self._should_run_battle_judge(tool_payload):
-                    judge_result = self._run_battle_judge(tool_payload=tool_payload or "")
-                    if judge_result is not None:
-                        will_end_battle, hp_loss, judge_reason = judge_result
-                        if will_end_battle:
-                            self._record_replay_reward(hp_loss)
-                            self.replay_current_count += 1
-                            self.replay_pending_reload = True
-                            self.replay_pending_floor = self.replay_current_floor
-                            self.replay_pending_signature = self.replay_current_signature
-
-                            replay_rsp = self._save_and_load_for_replay()
-                            if replay_rsp.is_ok():
-                                replay_action = (
-                                    "judge_replay: predicted battle end; "
-                                    f"hp_loss={hp_loss}; replay_count={self.replay_current_count}; "
-                                    "action skipped and save_and_load executed"
-                                )
-                                if judge_reason:
-                                    replay_action += f"; reason={judge_reason}"
-                                self.round.add_action(replay_action)
-                                self.error = None
-                                execution_has_error = False
-                                self._debug(
-                                    "Battle Replay",
-                                    replay_action,
-                                    "bright_yellow",
-                                )
-                            else:
-                                self.replay_pending_reload = False
-                                self.replay_pending_floor = None
-                                self.replay_pending_signature = None
-                                self.error = replay_rsp.error
-                                execution_has_error = True
-                                self._debug(
-                                    "Battle Replay",
-                                    f"save_and_load failed: {replay_rsp.error}",
-                                    "red",
-                                )
-
-                            try:
-                                record_battle_replay_reward(
-                                    LOGS_DIR,
-                                    run_dir_name=self.run_log_dir_name,
-                                    floor_index=self.log_current_floor,
-                                    battle_index=self.log_current_battle_index,
-                                    step=step,
-                                    hp_loss=hp_loss,
-                                    replay_count=self.replay_current_count,
-                                    judge_reason=judge_reason,
-                                    battle_session_key=self._battle_session_key(
-                                        self.replay_current_floor,
-                                        self.replay_current_signature,
-                                    ),
-                                    save_and_load_ok=replay_rsp.is_ok(),
-                                    save_and_load_error=replay_rsp.error,
-                                    tool_payload=tool_payload,
-                                )
-                            except Exception as e:
-                                logger.warning(f"Failed to persist replay reward log: {e}")
-
-                            continue
-
                 tool_call_started = True
                 self._record_tool_call(selected_tool_name)
                 rsp = self.tool_manager.call(

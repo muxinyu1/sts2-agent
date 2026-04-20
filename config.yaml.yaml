@@ -6,15 +6,17 @@ llm:
   base_url: "http://10.2.96.236:8080/v1"
   model: "Qwen3.5-397B-A17B"
   env_key_name: "LLM_KEY"
-  max_tokens: 2048
-  max_token_retries: 1
+  max_tokens: 32768
+  max_token_retries: 3
   sampling:
     temperature: 0.25
     top_p: 0.90
-    use_default_sampling: true
-    temperature_battle: 0.10
-    top_p_battle: 0.85
-    temperature_decision: 0.70
+    use_default_sampling: false
+
+    temperature_battle: 0.3
+    top_p_battle: 0.9
+
+    temperature_decision: 0.75
     top_p_decision: 0.95
     high_diversity_state_types:
       - card_reward
@@ -33,8 +35,8 @@ llm:
 agent:
   debug: true
   state_settle_seconds: 3
-  enable_tool_optimization: false
-  enable_battle_judge: true
+  enable_tool_optimization: true
+  enable_battle_replay: true
   battle_replay_limit_per_floor_battle: 5
 
 tools:
