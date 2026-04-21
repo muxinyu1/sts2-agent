@@ -1,5 +1,7 @@
+import argparse
 import os
 from pathlib import Path
+import time
 from config import Config, load_config
 from agent import Sts2Agent
 from llm import LLM
@@ -9,8 +11,19 @@ from tools import build_all_tools
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-CONFIG_PATH = PROJECT_ROOT / "config.yaml"
+DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.yaml"
 ENV_PATH = PROJECT_ROOT / ".env"
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run sts2-agent.")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG_PATH,
+        help="Path to YAML config file (default: config.yaml in project root)",
+    )
+    return parser.parse_args()
 
 
 def _load_dotenv(path: Path) -> None:
@@ -53,13 +66,30 @@ def _build_llm(config: Config) -> LLM:
         top_p=config.llm.sampling.top_p,
     )
 
+
+def _start_singleplayer_run(proxy: Proxy, seed: str) -> None:
+    run_seed = seed.strip()
+    if not run_seed:
+        raise ValueError("run.seed in config must be a non-empty string")
+
+    rsp = proxy.post({"action": "start_singleplayer_run", "seed": run_seed})
+    if not rsp.is_ok():
+        raise RuntimeError(f"start_singleplayer_run failed: {rsp.error}")
+
 def main():
+    args = _parse_args()
+    config_path = args.config.expanduser().resolve()
+
     _load_dotenv(ENV_PATH)
-    config = load_config(CONFIG_PATH)
+    config = load_config(config_path)
 
     proxy = _build_proxy(config)
     # 注入proxy
     game_env_instance.insert_proxy(proxy)
+    _start_singleplayer_run(proxy, config.run.seed)
+    # 等待加载
+    time.sleep(5)
+
     llm = _build_llm(config)
     tools = build_all_tools(enable_query_cards_info_tool=False)
 
