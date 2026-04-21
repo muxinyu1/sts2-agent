@@ -88,7 +88,7 @@ def main():
     game_env_instance.insert_proxy(proxy)
     _start_singleplayer_run(proxy, config.run.seed)
     # 等待加载
-    time.sleep(5)
+    time.sleep(10)
 
     llm = _build_llm(config)
     tools = build_all_tools(enable_query_cards_info_tool=False)
