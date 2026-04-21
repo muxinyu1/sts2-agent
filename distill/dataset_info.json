@@ -1,0 +1,12 @@
+{
+  "sts2_sft_weighted": {
+    "file_name": "sft_weighted.jsonl",
+    "columns": {
+      "prompt": "user_prompt",
+      "query": null,
+      "response": "response",
+      "system": "system_prompt",
+      "weight": "weight"
+    }
+  }
+}
