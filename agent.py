@@ -53,6 +53,29 @@ BATTLE_STATE_TYPES = {"monster", "elite", "boss"}
 AUTO_CARD_INFO_STATE_TYPES = {"card_reward", "card_select", "hand_select"}
 AUTO_CARD_INFO_MAX_UNIQUE_CARDS = 12
 AUTO_CARD_INFO_MAX_CHARS = 1024 * 8
+BATTLE_CONTEXT_STATE_TYPES = BATTLE_STATE_TYPES | {"hand_select"}
+DEFINITELY_NON_BATTLE_STATE_TYPES = {
+    "menu",
+    "rewards",
+    "card_reward",
+    "map",
+    "event",
+    "rest_site",
+    "shop",
+    "fake_merchant",
+    "treasure",
+    "relic_select",
+    "bundle_select",
+    "crystal_sphere",
+}
+COMBAT_PLAYER_FIELD_MARKERS = {
+    "energy",
+    "max_energy",
+    "hand",
+    "draw_pile_count",
+    "discard_pile_count",
+    "exhaust_pile_count",
+}
 console = Console()
 
 
@@ -638,10 +661,50 @@ class Sts2Agent(BaseModel):
             return floor
         return None
 
+    def _state_type(self) -> str | None:
+        if not isinstance(self.state.d, dict):
+            return None
+
+        state_type = self.state.d.get("state_type")
+        if isinstance(state_type, str) and state_type.strip():
+            return state_type.strip()
+        return None
+
+    def _has_combat_player_markers(self) -> bool:
+        if not isinstance(self.state.d, dict):
+            return False
+
+        player = self.state.d.get("player")
+        if not isinstance(player, dict):
+            return False
+
+        return any(marker in player for marker in COMBAT_PLAYER_FIELD_MARKERS)
+
+    def _is_definitely_non_battle_state(self) -> bool:
+        state_type = self._state_type()
+        return isinstance(state_type, str) and state_type in DEFINITELY_NON_BATTLE_STATE_TYPES
+
     def _is_in_battle_context(self) -> bool:
         if not isinstance(self.state.d, dict):
             return False
-        return isinstance(self.state.d.get("battle"), dict)
+
+        if isinstance(self.state.d.get("battle"), dict):
+            return True
+
+        state_type = self._state_type()
+        if isinstance(state_type, str) and state_type in BATTLE_CONTEXT_STATE_TYPES:
+            return True
+
+        if self._has_combat_player_markers():
+            return True
+
+        # Sticky guard:
+        # battle 内覆盖层（例如 card_select）在某些状态快照里可能缺少 battle 字段。
+        # 若上一拍还在战斗且当前并非“明确脱离战斗”的状态，则继续视为战斗中。
+        if self.replay_was_in_battle and not self._is_definitely_non_battle_state():
+            return True
+
+        return False
 
     def _update_log_bucket(self) -> None:
         run_floor = self._extract_run_floor()
