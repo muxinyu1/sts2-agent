@@ -49,22 +49,52 @@ class WeightedSFTTrainer(Trainer):
 
 def prepare_dataset(data_path, tokenizer, max_seq_len=4096):
     dataset = load_dataset("json", data_files=data_path, split="train")
+
+    def to_id_list(tokenized):
+        # Some tokenizer paths may return tokenizers.Encoding instead of list[int].
+        if hasattr(tokenized, "ids"):
+            tokenized = tokenized.ids
+        elif isinstance(tokenized, dict) and "input_ids" in tokenized:
+            tokenized = tokenized["input_ids"]
+
+        if isinstance(tokenized, torch.Tensor):
+            tokenized = tokenized.tolist()
+        elif isinstance(tokenized, tuple):
+            tokenized = list(tokenized)
+
+        if tokenized and isinstance(tokenized[0], list):
+            tokenized = tokenized[0]
+
+        return [int(x) for x in tokenized]
     
     def process_func(example):
+        system_prompt = example.get("system_prompt", "")
+        user_prompt = example.get("user_prompt", "")
+        response = example.get("response", "")
+
+        if not isinstance(system_prompt, str):
+            system_prompt = str(system_prompt)
+        if not isinstance(user_prompt, str):
+            user_prompt = str(user_prompt)
+        if not isinstance(response, str):
+            response = str(response)
+
         messages = [
-            {"role": "system", "content": example["system_prompt"]},
-            {"role": "user", "content": example["user_prompt"]}
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
         ]
         
         prompt_ids = tokenizer.apply_chat_template(
             messages, tokenize=True, add_generation_prompt=True
         )
+        prompt_ids = to_id_list(prompt_ids)
         
         
-        full_messages = messages + [{"role": "assistant", "content": example["response"]}]
+        full_messages = messages + [{"role": "assistant", "content": response}]
         input_ids = tokenizer.apply_chat_template(
             full_messages, tokenize=True
         )
+        input_ids = to_id_list(input_ids)
         
         # 截断
         input_ids = input_ids[:max_seq_len]
@@ -78,14 +108,15 @@ def prepare_dataset(data_path, tokenizer, max_seq_len=4096):
         return {
             "input_ids": input_ids,
             "labels": labels,
-            "weight": example["weight"]
+            "weight": float(example.get("weight", 1.0))
         }
 
     
     processed_dataset = dataset.map(
         process_func,
         remove_columns=dataset.column_names,
-        num_proc=16
+        num_proc=16,
+        writer_batch_size=32
     )
     return processed_dataset
 
