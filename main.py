@@ -1,6 +1,8 @@
 import argparse
 import os
 from pathlib import Path
+import random
+import string
 import time
 from config import Config, load_config
 from agent import Sts2Agent
@@ -76,6 +78,16 @@ def _start_singleplayer_run(proxy: Proxy, seed: str) -> None:
     if not rsp.is_ok():
         raise RuntimeError(f"start_singleplayer_run failed: {rsp.error}")
 
+def _death_to_main_menu(proxy: Proxy):
+    rsp = proxy.post({"action": "death_to_main_menu"})
+    if not rsp.is_ok():
+        raise RuntimeError(f"death_to_main_menu failed: {rsp.error}")
+    
+def _generate_random_seed():
+    chars = string.ascii_uppercase + string.digits
+    seed = "".join(random.choices(chars, k=10))
+    return seed
+
 def main():
     args = _parse_args()
     config_path = args.config.expanduser().resolve()
@@ -83,23 +95,29 @@ def main():
     _load_dotenv(ENV_PATH)
     config = load_config(config_path)
 
-    proxy = _build_proxy(config)
-    # 注入proxy
-    game_env_instance.insert_proxy(proxy)
-    _start_singleplayer_run(proxy, config.run.seed)
-    # 等待加载
-    time.sleep(10)
+    for _ in range(config.run.total_run_times):
+        proxy = _build_proxy(config)
+        # 注入proxy
+        game_env_instance.insert_proxy(proxy)
+        config.run.seed = _generate_random_seed()
+        _start_singleplayer_run(proxy, config.run.seed)
+        # 等待加载
+        time.sleep(10)
 
-    llm = _build_llm(config)
-    tools = build_all_tools(enable_query_cards_info_tool=False)
+        llm = _build_llm(config)
+        tools = build_all_tools(enable_query_cards_info_tool=False)
 
-    agent = Sts2Agent.build(
-        longterm_memories=[],
-        llm=llm,
-        all_available_tools=tools,
-        config=config,
-    )
-    agent.play()
+        agent = Sts2Agent.build(
+            longterm_memories=[],
+            llm=llm,
+            all_available_tools=tools,
+            config=config,
+        )
+        agent.play()
+    
+        # 等待“Continue”出现
+        time.sleep(5)
+        _death_to_main_menu(proxy)
 
 
 if __name__ == "__main__":

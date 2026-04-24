@@ -44,3 +44,4 @@ tools:
 
 run:
   seed: "XTEH794ZWL"
+  total_run_times: 5

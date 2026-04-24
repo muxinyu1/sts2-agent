@@ -61,6 +61,7 @@ class ToolsConfig(BaseModel):
 
 class RunConfig(BaseModel):
 	seed: str = "unknown"
+	total_run_times: int = 5
 
 
 class Config(BaseModel):
