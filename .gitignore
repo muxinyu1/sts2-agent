@@ -20,3 +20,5 @@ logs
 *.html
 test.py
 configs
+distill/dpo_pairs.jsonl
+distill/sft_weighted.jsonl
