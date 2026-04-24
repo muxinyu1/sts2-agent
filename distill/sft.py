@@ -120,18 +120,21 @@ def main():
         model_id,
         torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
+        low_cpu_mem_usage=True,
         trust_remote_code=True
     )
     
     
     training_args = TrainingArguments(
         output_dir=output_dir,
-        per_device_train_batch_size=4,
-        gradient_accumulation_steps=2,
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=8,
         learning_rate=1e-5,
         logging_steps=10,
         save_strategy="epoch",
         bf16=True,
+        gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
         remove_unused_columns=False,
         report_to="tensorboard",
         logging_dir=os.path.join(output_dir, "logs"),
