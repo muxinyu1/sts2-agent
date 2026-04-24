@@ -127,14 +127,16 @@ def main():
     
     training_args = TrainingArguments(
         output_dir=output_dir,
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=8,
+        per_device_train_batch_size=2,
+        gradient_accumulation_steps=4,
         learning_rate=1e-5,
         logging_steps=10,
         save_strategy="epoch",
         bf16=True,
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
+        dataloader_num_workers=4,
+        dataloader_pin_memory=True,
         remove_unused_columns=False,
         report_to="tensorboard",
         logging_dir=os.path.join(output_dir, "logs"),
