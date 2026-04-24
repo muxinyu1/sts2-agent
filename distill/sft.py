@@ -131,8 +131,10 @@ def main():
         learning_rate=1e-5,
         logging_steps=10,
         save_strategy="epoch",
-        bf16=True,                       
-        remove_unused_columns=False,    
+        bf16=True,
+        gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
+        remove_unused_columns=False,
         report_to="tensorboard",
         logging_dir=os.path.join(output_dir, "logs"),
         deepspeed="./distill/ds_z2_config.json"
