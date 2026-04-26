@@ -39,7 +39,7 @@ bf16: true
 gradient_checkpointing: true
 ddp_timeout: 180000000
 report_to: tensorboard
-deepspeed: ./distill/ds_z2_config.json
+deepspeed: ./distill/ds_z3_config.json
 
 ### DPO
 # pref_beta * delta_r is the implicit-reward gap term.
