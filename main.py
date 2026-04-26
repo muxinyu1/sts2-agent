@@ -99,8 +99,11 @@ def main():
         proxy = _build_proxy(config)
         # 注入proxy
         game_env_instance.insert_proxy(proxy)
-        config.run.seed = _generate_random_seed()
-        _start_singleplayer_run(proxy, config.run.seed)
+        run_seed = (
+            _generate_random_seed() if config.run.use_random_seed else config.run.seed
+        )
+        config.run.seed = run_seed
+        _start_singleplayer_run(proxy, run_seed)
         # 等待加载
         time.sleep(10)
 

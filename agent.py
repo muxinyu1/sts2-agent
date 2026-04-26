@@ -29,6 +29,7 @@ from util import (
     extract_summary,
     extract_think_preview,
     record_trajectory_sample,
+    record_run_statistics,
 )
 from loguru import logger
 from game_env import game_env_instance
@@ -257,8 +258,54 @@ class Sts2Agent(BaseModel):
         lines.append(f"- replay_reward_samples: {reward_samples}")
 
         stats_text = "\n".join(lines)
+
+        sorted_tool_calls = {
+            tool_name: count
+            for tool_name, count in sorted(
+                self.tool_call_counts.items(), key=lambda item: (-item[1], item[0])
+            )
+        }
+        config_snapshot = self.config.model_dump(mode="json")
+        stats_payload = {
+            "config": config_snapshot,
+            "tool_calls": {
+                "total": total_calls,
+                "error_total": error_calls,
+                "error_ratio_pct": round(error_ratio, 4),
+                "by_name": sorted_tool_calls,
+            },
+            "tool_selection_token_optimization": {
+                "steps": self.tool_prompt_optimization_steps,
+                "total_before": before,
+                "total_after": after,
+                "reduced_tokens": reduced,
+                "reduced_ratio_pct": round(reduction_ratio, 4),
+            },
+            "battle_replay": {
+                "replay_enabled": self.config.agent.enable_battle_replay,
+                "replay_limit_per_floor_battle": self.config.agent.battle_replay_limit_per_floor_battle,
+                "replay_attempt_total": replay_calls,
+                "replay_attempt_error_total": replay_errors,
+                "replay_attempt_error_ratio_pct": round(replay_error_ratio, 4),
+                "replay_reward_samples": reward_samples,
+                "rewards_by_battle": {
+                    str(k): [int(vv) for vv in v]
+                    for k, v in self.replay_rewards_by_battle.items()
+                },
+            },
+        }
+
         self._debug("Run Statistics", stats_text, "bright_magenta")
         logger.info("Run statistics:\n{}", stats_text)
+        try:
+            stats_path = record_run_statistics(
+                LOGS_DIR,
+                run_dir_name=self.run_log_dir_name,
+                stats=stats_payload,
+            )
+            logger.info("Run statistics persisted to: {}", stats_path)
+        except Exception as e:
+            logger.warning("Failed to persist run statistics: {}", e)
 
     def optimize_tool_selection(self) -> str:
         all_tools = self.tool_manager.tools

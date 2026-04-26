@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 
 def _extract_tag_content(content: str, tag: str) -> str | None:
@@ -172,3 +173,27 @@ def record_battle_replay_reward(
         f.write(json.dumps(sample, ensure_ascii=False) + "\n")
 
     return reward_log_path
+
+
+def record_run_statistics(
+    logs_dir: Path,
+    *,
+    run_dir_name: str | None = None,
+    stats: dict[str, Any],
+) -> Path:
+    trajectory_path = trajectory_log_path(
+        logs_dir,
+        run_dir_name=run_dir_name,
+    )
+    stats_log_path = trajectory_path.with_name("run_statistics.json")
+
+    payload = {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        **stats,
+    }
+
+    with stats_log_path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+
+    return stats_log_path

@@ -61,6 +61,7 @@ class ToolsConfig(BaseModel):
 
 class RunConfig(BaseModel):
 	seed: str = "unknown"
+	use_random_seed: bool = True
 	total_run_times: int = 5
 
 
