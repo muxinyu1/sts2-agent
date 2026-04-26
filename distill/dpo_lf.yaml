@@ -47,10 +47,9 @@ deepspeed: ./distill/ds_z3_config.json
 #   loss = -log sigmoid(pref_beta * delta_r - margin)
 pref_beta: 0.1
 pref_loss: sigmoid
-# Quantize the reference model to 4-bit (no gradients needed for ref).
-# This cuts ref-model VRAM from ~23GB to ~5.75GB per GPU, making ZeRO-2
-# sufficient on 8×H100 without hitting the ZeRO-3 mixed-dtype assertion.
-ref_model_quantization_bit: 4
+# Note: ref_model_quantization_bit is INCOMPATIBLE with ZeRO-3 — quantized
+# weights produce mixed dtypes (uint8 + bf16) and DeepSpeed's defragment
+# asserts a single dtype. With ZeRO-3 we instead let the ref model be
+# parameter-sharded across all GPUs (~18GB / 8 = ~2.25GB/GPU).
 # Freeze visual tower: text-only DPO data, no need to train vision params.
-# Also removes their gradients from memory.
 freeze_vision_tower: true
