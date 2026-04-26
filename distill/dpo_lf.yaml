@@ -39,10 +39,7 @@ bf16: true
 gradient_checkpointing: true
 ddp_timeout: 180000000
 report_to: tensorboard
-deepspeed: ./distill/ds_z3_config.json
-# Freeze the visual tower: it won't be trained (text-only DPO data), and
-# freezing avoids keeping its gradients in memory — critical for ZeRO-3 + DPO.
-freeze_vision_tower: true
+deepspeed: ./distill/ds_z2_config.json
 
 ### DPO
 # pref_beta * delta_r is the implicit-reward gap term.
@@ -50,3 +47,10 @@ freeze_vision_tower: true
 #   loss = -log sigmoid(pref_beta * delta_r - margin)
 pref_beta: 0.1
 pref_loss: sigmoid
+# Quantize the reference model to 4-bit (no gradients needed for ref).
+# This cuts ref-model VRAM from ~23GB to ~5.75GB per GPU, making ZeRO-2
+# sufficient on 8×H100 without hitting the ZeRO-3 mixed-dtype assertion.
+ref_model_quantization_bit: 4
+# Freeze visual tower: text-only DPO data, no need to train vision params.
+# Also removes their gradients from memory.
+freeze_vision_tower: true
