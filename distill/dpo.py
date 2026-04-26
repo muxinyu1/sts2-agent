@@ -159,6 +159,8 @@ def merge_llm_with_vision(trained_llm_dir: str, complete_dir: str, out_dir: str)
 def main():
     output_dir = "./saves/Qwen3.5-9B/DPO"
     base_model_id = "/models/models/Qwen3.5-9B"
+    # Prefer raw SFT Trainer checkpoint for policy/ref initialization.
+    sft_ckpt = "./saves/Qwen3.5-9B/SFT/checkpoint-1068"
     # SFT 产出的 *-complete 含完整视觉塔，作为视觉权重的来源 + 配置模板。
     sft_complete = "./saves/Qwen3.5-9B/SFT/checkpoint-1068-complete"
     data_path = "./distill/dpo_pairs.jsonl"
@@ -192,7 +194,11 @@ def main():
         low_cpu_mem_usage=True,
         trust_remote_code=True,
     )
-    policy_path = sft_complete if os.path.isdir(sft_complete) else base_model_id
+    policy_path = (
+        sft_ckpt
+        if os.path.isdir(sft_ckpt)
+        else (sft_complete if os.path.isdir(sft_complete) else base_model_id)
+    )
     model = AutoModelForCausalLM.from_pretrained(policy_path, **common_load_kwargs)
     ref_model = AutoModelForCausalLM.from_pretrained(policy_path, **common_load_kwargs)
     # If a new pad token was added, resize embeddings to match the tokenizer vocab.

@@ -22,12 +22,29 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 #   * visual.* tensors copied verbatim from the base model (correct keys),
 #   * LLM tensors taken from SFT and remapped to the multimodal namespace.
 # ---------------------------------------------------------------------------
-BASE_MODEL="/models/models/Qwen3.5-9B"
-SFT_CKPT="./saves/Qwen3.5-9B/SFT/checkpoint-1068-complete"
-FIXED_CKPT="./saves/Qwen3.5-9B/SFT/checkpoint-1068-fixed"
+BASE_MODEL="${BASE_MODEL:-/models/models/Qwen3.5-9B}"
+# Prefer the raw SFT Trainer checkpoint (AutoModelForCausalLM keys).
+# You can override from shell, e.g.:
+#   SFT_CKPT=/models/models/muxinyu/sts2-agent/saves/Qwen3.5-9B/SFT/checkpoint-1068 bash distill/dpo_lf.sh
+SFT_CKPT="${SFT_CKPT:-./saves/Qwen3.5-9B/SFT/checkpoint-1068}"
+FIXED_CKPT="${FIXED_CKPT:-./saves/Qwen3.5-9B/SFT/checkpoint-1068-fixed}"
 # Bump this when fix_merge.py output format changes; the script will then
 # rebuild the fixed checkpoint instead of reusing a stale one.
-FIX_MERGE_VERSION="v3-bf16-uniform"
+FIX_MERGE_VERSION="v4-bf16-uniform-keep-mtp"
+
+if [ ! -d "$SFT_CKPT" ]; then
+    ALT_SFT_CKPT="./saves/Qwen3.5-9B/SFT/checkpoint-1068-complete"
+    if [ -d "$ALT_SFT_CKPT" ]; then
+        echo "[dpo_lf] WARN: SFT_CKPT not found: $SFT_CKPT"
+        echo "[dpo_lf]       Falling back to: $ALT_SFT_CKPT"
+        SFT_CKPT="$ALT_SFT_CKPT"
+    else
+        echo "[dpo_lf] ERROR: SFT checkpoint path not found: $SFT_CKPT"
+        echo "[dpo_lf]        Please set SFT_CKPT to your real path, e.g.:"
+        echo "[dpo_lf]        SFT_CKPT=/models/models/muxinyu/sts2-agent/saves/Qwen3.5-9B/SFT/checkpoint-1068 bash distill/dpo_lf.sh"
+        exit 1
+    fi
+fi
 
 if [ -d "$FIXED_CKPT" ] && [ -f "$FIXED_CKPT/model.safetensors" ] && [ -f "$FIXED_CKPT/fix_merge_info.json" ] && grep -q "\"$FIX_MERGE_VERSION\"" "$FIXED_CKPT/fix_merge_info.json"; then
     echo "[dpo_lf] Fixed checkpoint already exists ($FIX_MERGE_VERSION), skipping merge: $FIXED_CKPT"
@@ -69,4 +86,25 @@ EOF
 # Step 3: Launch LlamaFactory DPO training
 # ---------------------------------------------------------------------------
 echo "[dpo_lf] Starting LlamaFactory DPO training..."
-llamafactory-cli train ./distill/dpo_lf.yaml
+RUNTIME_YAML="./distill/dpo_lf.runtime.yaml"
+python - "$FIXED_CKPT" "$RUNTIME_YAML" <<'EOF'
+import json
+import sys
+from pathlib import Path
+
+fixed_ckpt = sys.argv[1]
+runtime_yaml = Path(sys.argv[2])
+base_yaml = Path("./distill/dpo_lf.yaml")
+
+lines = []
+for line in base_yaml.read_text(encoding="utf-8").splitlines():
+    if line.startswith("model_name_or_path:"):
+        lines.append(f"model_name_or_path: {json.dumps(fixed_ckpt)}")
+    else:
+        lines.append(line)
+
+runtime_yaml.write_text("\n".join(lines) + "\n", encoding="utf-8")
+print(f"Written runtime config: {runtime_yaml}")
+EOF
+
+llamafactory-cli train "$RUNTIME_YAML"

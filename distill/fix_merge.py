@@ -54,9 +54,10 @@ import torch
 
 _VISUAL_HINTS = ("visual", "vision", "patch_embed", "merger")
 
-# Multi-token-prediction layers exist in the base CausalLM but are NOT used by
-# the multimodal Qwen3_5ForConditionalGeneration class. They show up as
-# UNEXPECTED keys when loading and only waste host memory — drop them.
+# Keep MTP tensors by default. Different upstream revisions may or may not
+# materialize these modules in the target class; dropping them unconditionally
+# can produce missing randomly-initialized fp32 params and trigger mixed-dtype
+# failures under DeepSpeed ZeRO-3.
 _DROP_HINTS = ("mtp",)
 
 
@@ -65,15 +66,38 @@ def is_visual_key(key: str) -> bool:
     return any(h in lk for h in _VISUAL_HINTS)
 
 
-def should_drop_key(key: str) -> bool:
+def should_drop_key(key: str, drop_mtp: bool) -> bool:
+    if not drop_mtp:
+        return False
     parts = key.lower().split(".")
     return any(h in parts for h in _DROP_HINTS)
 
 
 def remap_sft_key(key: str) -> str:
     """Rewrite an SFT (CausalLM-only) key to its multimodal equivalent."""
+    # Guard against accidental double-prefixing.
+    if key.startswith("model.language_model.language_model."):
+        return "model.language_model." + key[len("model.language_model.language_model.") :]
+
     if key.startswith("model.language_model.") or key.startswith("model.visual."):
         return key
+
+    # Some merged checkpoints store language model keys without the outer
+    # `model.` prefix; normalize them here.
+    if key.startswith("language_model.lm_head."):
+        return "lm_head." + key[len("language_model.lm_head.") :]
+    if key.startswith("language_model.model."):
+        return "model.language_model." + key[len("language_model.model.") :]
+    if key.startswith("language_model."):
+        return "model." + key
+
+    # Some variants nest the inner model as model.model.*.
+    if key.startswith("model.model."):
+        return "model.language_model." + key[len("model.model.") :]
+
+    if key.startswith("model.lm_head."):
+        return "lm_head." + key[len("model.lm_head.") :]
+
     # lm_head stays at the top level for Qwen3_5ForConditionalGeneration.
     if key.startswith("lm_head."):
         return key
@@ -96,6 +120,11 @@ def main() -> None:
     parser.add_argument("--sft", required=True, help="Path to the SFT (CausalLM) checkpoint.")
     parser.add_argument("--out", required=True, help="Output directory for the fixed merge.")
     parser.add_argument("--version", default="v2-bf16", help="Marker stored in fix_merge_info.json for cache validation.")
+    parser.add_argument(
+        "--drop-mtp",
+        action="store_true",
+        help="Drop MTP tensors from SFT checkpoint. Disabled by default for ZeRO-3 safety.",
+    )
     args = parser.parse_args()
 
     base = Path(args.base)
@@ -143,13 +172,27 @@ def main() -> None:
                 if is_visual_key(key):
                     skipped_visual += 1
                     continue
-                if should_drop_key(key):
+                if should_drop_key(key, args.drop_mtp):
                     skipped_mtp += 1
                     continue
                 new_key = remap_sft_key(key)
                 llm_tensors[new_key] = f.get_tensor(key).to(torch.bfloat16)
 
     merged = {**visual_tensors, **llm_tensors}
+
+    # Sanity checks to fail fast before writing a bad checkpoint.
+    dtype_set = {t.dtype for t in merged.values()}
+    if len(dtype_set) != 1:
+        raise RuntimeError(f"[fix_merge] mixed dtypes detected in merged tensors: {sorted(str(d) for d in dtype_set)}")
+
+    bad_double_prefix = [k for k in merged if "language_model.language_model." in k]
+    if bad_double_prefix:
+        preview = bad_double_prefix[:5]
+        raise RuntimeError(
+            "[fix_merge] detected doubly-prefixed language_model keys, e.g. "
+            f"{preview}. Check SFT key namespace/remap logic."
+        )
+
     print(f"[fix_merge] visual={len(visual_tensors)} llm={len(llm_tensors)} "
           f"skipped_sft_visual={skipped_visual} skipped_mtp={skipped_mtp} "
           f"total={len(merged)}")
@@ -175,6 +218,7 @@ def main() -> None:
                 "llm_tensors": len(llm_tensors),
                 "skipped_sft_visual": skipped_visual,
                 "skipped_mtp": skipped_mtp,
+                "drop_mtp": bool(args.drop_mtp),
             },
             indent=2,
         ),
