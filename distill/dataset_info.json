@@ -8,5 +8,16 @@
       "system": "system_prompt",
       "weight": "weight"
     }
+  },
+  "sts2_dpo": {
+    "file_name": "dpo_pairs_lf.jsonl",
+    "ranking": true,
+    "columns": {
+      "system": "system_prompt",
+      "prompt": "user_prompt",
+      "chosen": "chosen",
+      "rejected": "rejected",
+      "margin": "margin"
+    }
   }
 }
