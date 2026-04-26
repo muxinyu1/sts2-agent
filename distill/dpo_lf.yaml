@@ -1,6 +1,6 @@
 ### Model
-# Start from the SFT checkpoint (contains merged LLM + vision weights).
-# Falls back to the base model if the checkpoint directory does not exist.
+# checkpoint-1068-complete already contains the full model (LLM + visual tower)
+# produced by sft.sh's post-training merge step.
 model_name_or_path: ./saves/Qwen3.5-9B/SFT/checkpoint-1068-complete
 
 ### Method
@@ -39,7 +39,10 @@ bf16: true
 gradient_checkpointing: true
 ddp_timeout: 180000000
 report_to: tensorboard
-deepspeed: ./distill/ds_z2_config.json
+deepspeed: ./distill/ds_z3_config.json
+# Freeze the visual tower: it won't be trained (text-only DPO data), and
+# freezing avoids keeping its gradients in memory — critical for ZeRO-3 + DPO.
+freeze_vision_tower: true
 
 ### DPO
 # pref_beta * delta_r is the implicit-reward gap term.
@@ -47,5 +50,3 @@ deepspeed: ./distill/ds_z2_config.json
 #   loss = -log sigmoid(pref_beta * delta_r - margin)
 pref_beta: 0.1
 pref_loss: sigmoid
-# dpo_ftx > 0 adds a weighted SFT loss on chosen responses (optional).
-dpo_ftx: 0.0
