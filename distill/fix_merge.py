@@ -49,6 +49,7 @@ from pathlib import Path
 
 from safetensors import safe_open
 from safetensors.torch import save_file
+import torch
 
 
 _VISUAL_HINTS = ("visual", "vision", "patch_embed", "merger")
@@ -94,6 +95,7 @@ def main() -> None:
     parser.add_argument("--base", required=True, help="Path to the multimodal base model.")
     parser.add_argument("--sft", required=True, help="Path to the SFT (CausalLM) checkpoint.")
     parser.add_argument("--out", required=True, help="Output directory for the fixed merge.")
+    parser.add_argument("--version", default="v2-bf16", help="Marker stored in fix_merge_info.json for cache validation.")
     args = parser.parse_args()
 
     base = Path(args.base)
@@ -121,12 +123,15 @@ def main() -> None:
             shutil.copy2(src, out / name)
 
     # 2) Pull every visual tensor from the base model (correct keys).
+    # Cast everything to bf16 to keep a single dtype across the checkpoint;
+    # mixed dtypes (e.g. base float32 visual + bf16 LLM) trigger DeepSpeed
+    # ZeRO-3's `assert len(set(t.dtype for t in tensors)) == 1` in defragment.
     visual_tensors = {}
     for shard in iter_safetensor_shards(base):
         with safe_open(shard, framework="pt") as f:
             for key in f.keys():
                 if is_visual_key(key):
-                    visual_tensors[key] = f.get_tensor(key)
+                    visual_tensors[key] = f.get_tensor(key).to(torch.bfloat16)
 
     # 3) Pull every LLM tensor from the SFT checkpoint, remapping keys.
     llm_tensors = {}
@@ -142,7 +147,7 @@ def main() -> None:
                     skipped_mtp += 1
                     continue
                 new_key = remap_sft_key(key)
-                llm_tensors[new_key] = f.get_tensor(key)
+                llm_tensors[new_key] = f.get_tensor(key).to(torch.bfloat16)
 
     merged = {**visual_tensors, **llm_tensors}
     print(f"[fix_merge] visual={len(visual_tensors)} llm={len(llm_tensors)} "
@@ -162,6 +167,8 @@ def main() -> None:
     (out / "fix_merge_info.json").write_text(
         json.dumps(
             {
+                "version": args.version,
+                "dtype": "bfloat16",
                 "base": str(base),
                 "sft": str(sft),
                 "visual_tensors": len(visual_tensors),

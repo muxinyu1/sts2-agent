@@ -25,16 +25,20 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 BASE_MODEL="/models/models/Qwen3.5-9B"
 SFT_CKPT="./saves/Qwen3.5-9B/SFT/checkpoint-1068-complete"
 FIXED_CKPT="./saves/Qwen3.5-9B/SFT/checkpoint-1068-fixed"
+# Bump this when fix_merge.py output format changes; the script will then
+# rebuild the fixed checkpoint instead of reusing a stale one.
+FIX_MERGE_VERSION="v2-bf16"
 
-if [ -d "$FIXED_CKPT" ] && [ -f "$FIXED_CKPT/model.safetensors" ] && [ -f "$FIXED_CKPT/fix_merge_info.json" ] && grep -q "skipped_mtp" "$FIXED_CKPT/fix_merge_info.json"; then
-    echo "[dpo_lf] Fixed checkpoint already exists, skipping merge: $FIXED_CKPT"
+if [ -d "$FIXED_CKPT" ] && [ -f "$FIXED_CKPT/model.safetensors" ] && [ -f "$FIXED_CKPT/fix_merge_info.json" ] && grep -q "\"$FIX_MERGE_VERSION\"" "$FIXED_CKPT/fix_merge_info.json"; then
+    echo "[dpo_lf] Fixed checkpoint already exists ($FIX_MERGE_VERSION), skipping merge: $FIXED_CKPT"
 else
-    echo "[dpo_lf] Rebuilding key-correct merged checkpoint..."
+    echo "[dpo_lf] Rebuilding key-correct merged checkpoint ($FIX_MERGE_VERSION)..."
     rm -rf "$FIXED_CKPT"
     python ./distill/fix_merge.py \
         --base "$BASE_MODEL" \
         --sft  "$SFT_CKPT" \
-        --out  "$FIXED_CKPT"
+        --out  "$FIXED_CKPT" \
+        --version "$FIX_MERGE_VERSION"
 fi
 
 # ---------------------------------------------------------------------------
