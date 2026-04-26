@@ -91,4 +91,14 @@ battle_replay:
 
 <img width="414" height="379" alt="image" src="https://github.com/user-attachments/assets/82a2efaf-a823-4bad-94d5-8c1e81295a9b" />
 
+### Result
+
+
+| 模型 | 对局数 | 平均工具调用错误率 | 平均攀爬层数 |
+|---|---|---|---|
+| `Qwen3.5-9B` | 6 | **8.37%** | **14.67** |
+| `Qwen3.5-9B Distill` | 5 | **0.82%** | **17.20** |
+
+> 对局种子相同，重复5次
+
 ## Qwen 3.5 9B DPO
