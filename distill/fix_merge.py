@@ -53,19 +53,29 @@ from safetensors.torch import save_file
 
 _VISUAL_HINTS = ("visual", "vision", "patch_embed", "merger")
 
+# Multi-token-prediction layers exist in the base CausalLM but are NOT used by
+# the multimodal Qwen3_5ForConditionalGeneration class. They show up as
+# UNEXPECTED keys when loading and only waste host memory — drop them.
+_DROP_HINTS = ("mtp",)
+
 
 def is_visual_key(key: str) -> bool:
     lk = key.lower()
     return any(h in lk for h in _VISUAL_HINTS)
 
 
+def should_drop_key(key: str) -> bool:
+    parts = key.lower().split(".")
+    return any(h in parts for h in _DROP_HINTS)
+
+
 def remap_sft_key(key: str) -> str:
     """Rewrite an SFT (CausalLM-only) key to its multimodal equivalent."""
     if key.startswith("model.language_model.") or key.startswith("model.visual."):
         return key
+    # lm_head stays at the top level for Qwen3_5ForConditionalGeneration.
     if key.startswith("lm_head."):
-        # lm_head sits under language_model in the multimodal layout.
-        return "model.language_model." + key
+        return key
     if key.startswith("model."):
         # model.layers.X -> model.language_model.layers.X
         return "model.language_model." + key[len("model.") :]
@@ -121,18 +131,23 @@ def main() -> None:
     # 3) Pull every LLM tensor from the SFT checkpoint, remapping keys.
     llm_tensors = {}
     skipped_visual = 0
+    skipped_mtp = 0
     for shard in iter_safetensor_shards(sft):
         with safe_open(shard, framework="pt") as f:
             for key in f.keys():
                 if is_visual_key(key):
                     skipped_visual += 1
                     continue
+                if should_drop_key(key):
+                    skipped_mtp += 1
+                    continue
                 new_key = remap_sft_key(key)
                 llm_tensors[new_key] = f.get_tensor(key)
 
     merged = {**visual_tensors, **llm_tensors}
     print(f"[fix_merge] visual={len(visual_tensors)} llm={len(llm_tensors)} "
-          f"skipped_sft_visual={skipped_visual} total={len(merged)}")
+          f"skipped_sft_visual={skipped_visual} skipped_mtp={skipped_mtp} "
+          f"total={len(merged)}")
 
     # 4) Write a single safetensors file. ~18GB for 9B bf16 — fine.
     out_path = out / "model.safetensors"
@@ -152,6 +167,7 @@ def main() -> None:
                 "visual_tensors": len(visual_tensors),
                 "llm_tensors": len(llm_tensors),
                 "skipped_sft_visual": skipped_visual,
+                "skipped_mtp": skipped_mtp,
             },
             indent=2,
         ),

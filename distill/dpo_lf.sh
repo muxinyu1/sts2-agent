@@ -26,10 +26,11 @@ BASE_MODEL="/models/models/Qwen3.5-9B"
 SFT_CKPT="./saves/Qwen3.5-9B/SFT/checkpoint-1068-complete"
 FIXED_CKPT="./saves/Qwen3.5-9B/SFT/checkpoint-1068-fixed"
 
-if [ -d "$FIXED_CKPT" ] && [ -f "$FIXED_CKPT/model.safetensors" ]; then
+if [ -d "$FIXED_CKPT" ] && [ -f "$FIXED_CKPT/model.safetensors" ] && [ -f "$FIXED_CKPT/fix_merge_info.json" ] && grep -q "skipped_mtp" "$FIXED_CKPT/fix_merge_info.json"; then
     echo "[dpo_lf] Fixed checkpoint already exists, skipping merge: $FIXED_CKPT"
 else
     echo "[dpo_lf] Rebuilding key-correct merged checkpoint..."
+    rm -rf "$FIXED_CKPT"
     python ./distill/fix_merge.py \
         --base "$BASE_MODEL" \
         --sft  "$SFT_CKPT" \
