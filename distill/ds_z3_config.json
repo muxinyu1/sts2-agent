@@ -1,5 +1,5 @@
 {
-  "bfloat16": {
+  "bf16": {
     "enabled": true
   },
   "zero_optimization": {

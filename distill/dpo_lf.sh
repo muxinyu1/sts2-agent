@@ -27,7 +27,7 @@ SFT_CKPT="./saves/Qwen3.5-9B/SFT/checkpoint-1068-complete"
 FIXED_CKPT="./saves/Qwen3.5-9B/SFT/checkpoint-1068-fixed"
 # Bump this when fix_merge.py output format changes; the script will then
 # rebuild the fixed checkpoint instead of reusing a stale one.
-FIX_MERGE_VERSION="v2-bf16"
+FIX_MERGE_VERSION="v3-bf16-uniform"
 
 if [ -d "$FIXED_CKPT" ] && [ -f "$FIXED_CKPT/model.safetensors" ] && [ -f "$FIXED_CKPT/fix_merge_info.json" ] && grep -q "\"$FIX_MERGE_VERSION\"" "$FIXED_CKPT/fix_merge_info.json"; then
     echo "[dpo_lf] Fixed checkpoint already exists ($FIX_MERGE_VERSION), skipping merge: $FIXED_CKPT"
