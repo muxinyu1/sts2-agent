@@ -1,7 +1,7 @@
 ### Model
-# checkpoint-1068-complete already contains the full model (LLM + visual tower)
-# produced by sft.sh's post-training merge step.
-model_name_or_path: ./saves/Qwen3.5-9B/SFT/checkpoint-1068-complete
+# Built by Step 1 of dpo_lf.sh (fix_merge.py): visual tower from base model
+# (correct keys) + SFT LLM weights remapped to model.language_model.*.
+model_name_or_path: ./saves/Qwen3.5-9B/SFT/checkpoint-1068-fixed
 
 ### Method
 stage: dpo

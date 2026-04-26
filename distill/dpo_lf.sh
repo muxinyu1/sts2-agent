@@ -8,7 +8,36 @@ export CUDA_DEVICE_MAX_CONNECTIONS=1
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
 # ---------------------------------------------------------------------------
-# Step 1: Pre-scale margins
+# Step 1: Build a key-correct merged checkpoint.
+#
+# Why this is needed:
+#   - SFT was run with AutoModelForCausalLM, so its shards only contain the
+#     language-model weights, with keys like `model.layers.X` and `lm_head.X`.
+#   - LlamaFactory loads Qwen3_5ForConditionalGeneration, which expects keys
+#     under `model.language_model.X` and `model.visual.X`.
+#   - The previous merge.py produced a checkpoint where the visual tower
+#     ended up MISSING (random init) — wasting VRAM and breaking deployment.
+#
+# fix_merge.py rebuilds a checkpoint with:
+#   * visual.* tensors copied verbatim from the base model (correct keys),
+#   * LLM tensors taken from SFT and remapped to the multimodal namespace.
+# ---------------------------------------------------------------------------
+BASE_MODEL="/models/models/Qwen3.5-9B"
+SFT_CKPT="./saves/Qwen3.5-9B/SFT/checkpoint-1068-complete"
+FIXED_CKPT="./saves/Qwen3.5-9B/SFT/checkpoint-1068-fixed"
+
+if [ -d "$FIXED_CKPT" ] && [ -f "$FIXED_CKPT/model.safetensors" ]; then
+    echo "[dpo_lf] Fixed checkpoint already exists, skipping merge: $FIXED_CKPT"
+else
+    echo "[dpo_lf] Rebuilding key-correct merged checkpoint..."
+    python ./distill/fix_merge.py \
+        --base "$BASE_MODEL" \
+        --sft  "$SFT_CKPT" \
+        --out  "$FIXED_CKPT"
+fi
+
+# ---------------------------------------------------------------------------
+# Step 2: Pre-scale margins
 # dpo_pairs.jsonl stores raw HP-loss deltas (integers, range ~[0, 80]).
 # LlamaFactory uses the margin column directly in the DPO loss:
 #   loss = -log sigmoid(pref_beta * delta_r - margin)
@@ -32,7 +61,7 @@ print(f"Written: {dst}")
 EOF
 
 # ---------------------------------------------------------------------------
-# Step 2: Launch LlamaFactory DPO training
+# Step 3: Launch LlamaFactory DPO training
 # ---------------------------------------------------------------------------
 echo "[dpo_lf] Starting LlamaFactory DPO training..."
 llamafactory-cli train ./distill/dpo_lf.yaml
