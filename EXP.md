@@ -1,6 +1,4 @@
-# Seed
-
-```plain text
+```plaintext
 BASELINE
 ```
 
@@ -8,37 +6,37 @@ BASELINE
 
 ## Baseline
 
-### Exp Config
+### 实验配置
 
-|Tool Optimization|Query Card Info Tool|Temperature|Top P|
+|工具优化|查询卡牌信息工具|Temperature|Top P|
 |---|---|---|---|
 |False|False|0.25|0.9|
 
-### Result
+### 结果
 
-- Floor: 17
-- Tool Call Error Rate: 3.40%
+- 层数：17
+- 工具调用错误率：3.40%
 
-## Ablation Study
+## 消融实验
 
-### Enable Tool Optimization
+### 启用工具优化
 
-- Tool Call Error Rate: 0.63%
-- Tokens Reduced: 88.40%
+- 工具调用错误率：0.63%
+- Token 减少比例：88.40%
 
 # Qwen 3.5 9B
 
 ## Baseline
 
-### No Tool Optimization
+### 无工具优化
 
-游戏开始界面选遗物都选不对，工具太多了，小模型的tool use能力还是有问题，所以启用了工具优化
+游戏开始界面选遗物都选不对，工具太多了，小模型的 tool use 能力还是有问题，所以启用了工具优化
 
-### Use Tool Optimization
+### 使用工具优化
 
 爬到了第七层
 
-```plain text
+```plaintext
 tool_calls_total: 121
 tool_calls_error_total: 7
 tool_calls_error_ratio: 5.79%
@@ -74,8 +72,8 @@ battle_replay:
 
 ### 筛选原则
 
-- 出现错误工具调用去除
-- 输出tokens大于8192去除
+- 出现错误工具调用的去除
+- 输出 tokens 大于 8192 的去除
 
 ### 原始数据格式
 
@@ -85,14 +83,13 @@ battle_replay:
 
 ### 训练策略
 
-同一战斗多次rollout之间，用 mean hp loss - hp_loss 做组内相对优势，再用 softmax 转成 SFT 损失加权 —— 在同战斗内对"打得更好"的轨迹上加权学习，弱化失败轨迹。非战斗样本默认权重 1.0 全量学习。
+同一战斗多次 rollout 之间，用 mean hp loss - hp_loss 做组内相对优势，再用 softmax 转成 SFT 损失加权 —— 在同战斗内对“打得更好”的轨迹上加权学习，弱化失败轨迹。非战斗样本默认权重 1.0 全量学习。
 
 ### loss
 
 <img width="414" height="379" alt="image" src="https://github.com/user-attachments/assets/82a2efaf-a823-4bad-94d5-8c1e81295a9b" />
 
-### Result
-
+### 结果
 
 | 模型 | 对局数 | 平均工具调用错误率 | 平均攀爬层数 |
 |---|---|---|---|
@@ -103,12 +100,8 @@ battle_replay:
 
 ## Qwen 3.5 9B DPO
 
-
 | 模型 | 对局数 | 平均错误率(%) | 错误率方差 | 平均攀爬层数 | 层数方差 |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | Qwen3.5-9B | 6 | 8.3676 | 25.3006 | 14.67 | 28.8889 |
 | Qwen3.5-397B-A17B-Distill-Qwen3.5-9B  | 5 | 0.8209 | 0.5746 | 17.20 | 44.9600 |
 | Qwen3.5-397B-A17B-Distill-Qwen3.5-9B-DPO | 5 | 0.5590 | 0.1174 | 16.20 | 2.5600 |
-
-
-
